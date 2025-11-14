@@ -19,7 +19,7 @@ const initialState: AppState = {
 
 // ACTIONS
 type AppAction =
-  | { type: "LOGIN"; payload: { userId: number } }
+  | { type: "LOGIN"; payload: { user: User } }
   | { type: "LOGOUT" }
   | { type: "ADD_REQUEST"; payload: Omit<Request, "id" | "status" | "requestedAt"> }
   | { type: "UPDATE_REQUEST_STATUS"; payload: { requestId: number; status: RequestStatus; userId: number } };
@@ -28,8 +28,7 @@ type AppAction =
 const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
     case "LOGIN":
-      const userToLogin = state.users.find(u => u.id === action.payload.userId) || null;
-      return { ...state, user: userToLogin };
+      return { ...state, user: action.payload.user };
     case "LOGOUT":
       return { ...state, user: null };
     case "ADD_REQUEST":
@@ -56,7 +55,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
 
 // CONTEXT
 interface AppContextType extends AppState {
-  login: (userId: number) => void;
+  login: (username: string, password?: string) => { success: boolean, message: string };
   logout: () => void;
   addRequest: (requestData: Omit<Request, "id" | "status" | "requestedAt">) => { success: boolean, message: string };
   updateRequestStatus: (requestId: number, status: RequestStatus) => void;
@@ -68,9 +67,21 @@ export const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppContextProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  const login = useCallback((userId: number) => {
-    dispatch({ type: "LOGIN", payload: { userId } });
-  }, []);
+  const login = useCallback((username: string, password?: string) => {
+    const userToLogin = state.users.find(u => u.username === username);
+    
+    if (!userToLogin) {
+      return { success: false, message: "User not found." };
+    }
+    
+    // In a real app, you'd hash the password. Here we do a simple check.
+    if (userToLogin.password !== password) {
+      return { success: false, message: "Incorrect password." };
+    }
+
+    dispatch({ type: "LOGIN", payload: { user: userToLogin } });
+    return { success: true, message: "Login successful!" };
+  }, [state.users]);
 
   const logout = useCallback(() => {
     dispatch({ type: "LOGOUT" });

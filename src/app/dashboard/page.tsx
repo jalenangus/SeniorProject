@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAppContext } from "@/hooks/useAppContext";
 import FacultyDashboard from "@/components/dashboard/FacultyDashboard";
 import ManagerDashboard from "@/components/dashboard/ManagerDashboard";
+import StudentDashboard from "@/components/dashboard/StudentDashboard";
 import { Header } from "@/components/Header";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -42,6 +43,7 @@ export default function DashboardPage() {
       <main className="flex-1">
         {user.role === "Requester" && <FacultyDashboard />}
         {user.role === "Approver" && <ManagerDashboard />}
+        {user.role === "Student" && <StudentDashboard />}
       </main>
     </div>
   );

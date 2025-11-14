@@ -4,6 +4,8 @@ export const mockUsers: User[] = [
   {
     id: 1,
     name: "Dr. Alice Smith",
+    username: "asmith",
+    password: "password",
     email: "asmith@ncat.edu",
     role: "Requester",
     canRequest: true,
@@ -11,6 +13,8 @@ export const mockUsers: User[] = [
   {
     id: 2,
     name: "Dr. Bob Johnson",
+    username: "bjohnson",
+    password: "password",
     email: "bjohnson@ncat.edu",
     role: "Requester",
     canRequest: true,
@@ -18,6 +22,8 @@ export const mockUsers: User[] = [
   {
     id: 3,
     name: "Mr. Charlie Brown",
+    username: "cbrown",
+    password: "password",
     email: "cbrown@ncat.edu",
     role: "Approver",
     canRequest: false,
@@ -26,6 +32,8 @@ export const mockUsers: User[] = [
   {
     id: 4,
     name: "Ms. Diana Prince",
+    username: "dprince",
+    password: "password",
     email: "dprince@ncat.edu",
     role: "Approver",
     canRequest: false,
@@ -34,9 +42,41 @@ export const mockUsers: User[] = [
   {
     id: 5,
     name: "Prof. Eve Adams",
+    username: "eadams",
+    password: "password",
     email: "eadams@ncat.edu",
     role: "Requester",
     canRequest: false, // This user cannot make requests, for testing RBAC
+  },
+  {
+    id: 6,
+    name: "John Doe",
+    username: "johndoe",
+    password: "password",
+    email: "jdoe@aggies.ncat.edu",
+    role: "Student",
+    studentId: "123456789",
+    canRequest: false,
+  },
+  {
+    id: 7,
+    name: "Jane Roe",
+    username: "janeroe",
+    password: "password",
+    email: "jroe@aggies.ncat.edu",
+    role: "Student",
+    studentId: "987654321",
+    canRequest: false,
+  },
+  {
+    id: 8,
+    name: "Peter Pan",
+    username: "ppan",
+    password: "password",
+    email: "ppan@aggies.ncat.edu",
+    role: "Student",
+    studentId: "112233445",
+    canRequest: false,
   },
 ];
 

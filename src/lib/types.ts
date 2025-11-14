@@ -1,12 +1,15 @@
-export type UserRole = "Requester" | "Approver" | "Admin";
+export type UserRole = "Requester" | "Approver" | "Admin" | "Student";
 
 export interface User {
   id: number;
   name: string;
+  username: string;
+  password?: string; // Should be handled securely, not stored plaintext
   email: string;
   role: UserRole;
   canRequest: boolean;
   managesBuildingIds?: number[];
+  studentId?: string;
 }
 
 export interface Student {

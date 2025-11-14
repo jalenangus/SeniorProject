@@ -4,7 +4,7 @@ import { AppProvider } from '@/components/AppProvider';
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: 'AggieAccess',
+  title: 'AggieRequest',
   description: 'Aggie One Access Request System Prototype',
 };
 
