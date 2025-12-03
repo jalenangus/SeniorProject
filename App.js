@@ -16,136 +16,382 @@ import {
   useColorScheme,
   FlatList,
   Easing,
+  StatusBar,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-
 import { createDrawerNavigator } from "@react-navigation/drawer";
+
+// --- Navigation ---
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
 
-/* ---------------- THEME (Luxury) ---------------- */
+// --- Supabase Backend ---
+import { supabase } from "./supabase/client";
+import { signInUser, signUpUser, signOutUser } from "./supabase/auth";
+
+/* ---------------- THEME (Modern Light) ---------------- */
+
+const NCAT_BLUE = "#003399";
+const NCAT_BLUE_SOFT = "#2453C4";
+
 function buildTheme(scheme) {
-  const dark = scheme !== "light";
+  // force light style but respect system if you want later
+  const light = true;
   return {
-    bg: dark ? "#030308" : "#0b0b0b",
-    panel: dark ? "#0b0c0f" : "#111214",
-    neon: "#00ffd5", // subtle neon accent
-    gold: "#FFD700", // luxury gold
-    goldMuted: "#E6C26B",
-    text: "#E8EEF6",
-    muted: "#9AA4B2",
-    border: "#1b1f26",
-    card: dark ? "#0f1216" : "#101214",
+    bg: "#F5F5F7", // base background like iOS settings
+    surface: "#FFFFFF",
+    surfaceAlt: "#F9F9FB",
+    accent: NCAT_BLUE,
+    accentSoft: NCAT_BLUE_SOFT,
+    text: "#111827",
+    muted: "#6B7280",
+    border: "#E5E7EB",
+    danger: "#DC2626",
+    success: "#16A34A",
+    pending: "#D97706",
+    shadow: "#000000",
   };
 }
 
 /* ---------------- HELPERS ---------------- */
-function useFadeIn(duration = 420) {
+
+function useFadeIn(duration = 300) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(anim, { toValue: 1, duration, useNativeDriver: true }).start();
+    Animated.timing(anim, {
+      toValue: 1,
+      duration,
+      useNativeDriver: true,
+    }).start();
   }, []);
   return anim;
 }
-function PressableScale({ onPress, children, style }) {
+
+function PressableScale({ onPress, children, style, disabled }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
     <TouchableOpacity
-      activeOpacity={1}
-      onPressIn={() => Animated.spring(scale, { toValue: 0.975, useNativeDriver: true }).start()}
-      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start()}
+      activeOpacity={0.85}
+      disabled={disabled}
+      onPressIn={() =>
+        Animated.spring(scale, {
+          toValue: 0.97,
+          useNativeDriver: true,
+        }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }).start()
+      }
       onPress={onPress}
     >
-      <Animated.View style={[{ transform: [{ scale }] }, style]}>{children}</Animated.View>
+      <Animated.View style={[{ transform: [{ scale }] }, style]}>
+        {children}
+      </Animated.View>
     </TouchableOpacity>
   );
 }
 
-/* ---------------- Header (used with parallax) ---------------- */
-function AppHeader({ title, subtitle, theme, right, scrollY }) {
-  // parallax: shrink title slightly as scrollY increases
-  const scale = scrollY ? scrollY.interpolate({ inputRange: [0, 120], outputRange: [1, 0.92], extrapolate: "clamp" }) : 1;
-  const translateY = scrollY ? scrollY.interpolate({ inputRange: [0, 120], outputRange: [0, -6], extrapolate: "clamp" }) : 0;
+/* ---------------- SMALL UI COMPONENTS ---------------- */
 
+function Tag({ label, tone = "default", theme }) {
+  let bg = theme.surfaceAlt;
+  let color = theme.muted;
+  if (tone === "success") {
+    bg = "rgba(22,163,74,0.1)";
+    color = theme.success;
+  } else if (tone === "danger") {
+    bg = "rgba(220,38,38,0.1)";
+    color = theme.danger;
+  } else if (tone === "pending") {
+    bg = "rgba(217,119,6,0.1)";
+    color = theme.pending;
+  } else if (tone === "info") {
+    bg = "rgba(37,99,235,0.08)";
+    color = theme.accent;
+  }
   return (
-    <Animated.View style={[styles.headerRow, { transform: [{ scale }, { translateY }], borderBottomWidth: 0 }]}>
-      <View style={[styles.logoBox, { backgroundColor: theme.panel, shadowColor: theme.gold }]}>
-        <Text style={[styles.logoText, { color: theme.gold }]}>A</Text>
+    <View style={[styles.tag, { backgroundColor: bg }]}>
+      <Text style={{ color, fontSize: 11, fontWeight: "600" }}>{label}</Text>
+    </View>
+  );
+}
+
+function PipelineStrip({ theme }) {
+  const steps = [
+    "Submit Request",
+    "Validate",
+    "Chair Review",
+    "Aggie One",
+    "Complete",
+  ];
+  return (
+    <View style={styles.pipelineStrip}>
+      {steps.map((step, index) => (
+        <View key={step} style={styles.pipelineStep}>
+          <View
+            style={[
+              styles.pipelineDot,
+              {
+                borderColor: theme.accent,
+                backgroundColor: index === 0 ? theme.accent : "#FFFFFF",
+              },
+            ]}
+          />
+          <Text
+            style={[styles.pipelineLabel, { color: theme.muted }]}
+            numberOfLines={1}
+          >
+            {step}
+          </Text>
+          {index < steps.length - 1 && (
+            <View
+              style={[
+                styles.pipelineConnector,
+                { borderColor: theme.border },
+              ]}
+            />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/* ---------------- Header (with optional back button) ---------------- */
+
+function AppHeader({
+  title,
+  subtitle,
+  theme,
+  right,
+  showBack,
+  navigation,
+}) {
+  return (
+    <View style={styles.headerWrapper}>
+      <View style={styles.headerRow}>
+        {showBack && navigation ? (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.headerBackButton}
+          >
+            <Text style={[styles.headerBackText, { color: theme.accent }]}>
+              ‹
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: theme.text, marginLeft: showBack ? 0 : 2 },
+            ]}
+          >
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text style={[styles.headerSubtitle, { color: theme.muted }]}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+
+        {right ? <View style={{ marginLeft: 12 }}>{right}</View> : null}
       </View>
-      <View style={{ marginLeft: 12, flex: 1 }}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>{title}</Text>
-        {subtitle ? <Text style={[styles.headerSubtitle, { color: theme.muted }]}>{subtitle}</Text> : null}
-      </View>
-      {right ? <View style={{ justifyContent: "center" }}>{right}</View> : null}
-    </Animated.View>
+    </View>
   );
 }
 
 /* ---------------- LOGIN ---------------- */
+
 function LoginScreen({ navigation, theme }) {
-  const fade = useFadeIn(420);
+  const fade = useFadeIn(320);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const tryLogin = async () => {
-    if (!email.trim() || !password) return Alert.alert("Please enter both email and password.");
-    try {
-      const usersJson = await AsyncStorage.getItem("users");
-      const users = usersJson ? JSON.parse(usersJson) : [];
-      const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-      if (!found) return Alert.alert("Login failed", "Incorrect credentials or account not found.");
-
-      await AsyncStorage.setItem("user", JSON.stringify(found));
-      if (found.role === "admin") navigation.replace("AdminPanel");
-      else navigation.replace("Home");
-    } catch (e) {
-      console.log("login error", e);
-      Alert.alert("Error", "Could not log in.");
+    if (!email || !password) {
+      Alert.alert("Missing information", "Enter both email and password.");
+      return;
     }
+
+    setLoading(true);
+    const { data, error } = await signInUser(email.trim(), password);
+
+    if (error) {
+      setLoading(false);
+      Alert.alert("Login failed", error.message);
+      return;
+    }
+
+    try {
+      const user = {
+        id: data.user?.id ?? Date.now().toString(),
+        email: data.user?.email ?? email.trim(),
+        name: data.user?.user_metadata?.full_name || email.split("@")[0],
+        role: "professor",
+        approved: true,
+      };
+
+      await AsyncStorage.setItem("user", JSON.stringify(user));
+    } catch (e) {
+      console.log("Error storing user locally", e);
+    }
+
+    setLoading(false);
+    Alert.alert("Success", "Welcome to Aggie One Access.");
+    navigation.replace("MainApp");
   };
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <StatusBar barStyle="dark-content" />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+      >
         <Animated.View style={[styles.container, { opacity: fade }]}>
-          <AppHeader title="Aggie One Access — Premium" subtitle="Sign in with your NCAT account" theme={theme} />
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.cardTitle, { color: theme.gold }]}>Welcome back</Text>
-            <Text style={[styles.hint, { color: theme.muted }]}>Secure sign-in • enterprise access</Text>
+          <AppHeader
+            title="Aggie One Access"
+            subtitle="Sign in with your NCAT credentials"
+            theme={theme}
+            showBack={false}
+            navigation={navigation}
+          />
 
-            <TextInput
-              style={[styles.input, { borderColor: theme.border, backgroundColor: "#0b0b0b", color: theme.text }]}
-              placeholder="NCAT email"
-              placeholderTextColor={theme.muted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
-            />
-            <TextInput
-              style={[styles.input, { borderColor: theme.border, backgroundColor: "#0b0b0b", color: theme.text }]}
-              placeholder="Password"
-              placeholderTextColor={theme.muted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
+          <ScrollView
+            contentContainerStyle={{ paddingBottom: 32 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.surface,
+                  borderColor: theme.border,
+                  shadowColor: theme.shadow,
+                },
+              ]}
+            >
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                Sign in
+              </Text>
+              <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+                Access building requests, approvals, and status tracking in one
+                place.
+              </Text>
 
-            <PressableScale onPress={tryLogin} style={{ marginTop: 12 }}>
-              <View style={[styles.primaryBtn, { backgroundColor: theme.gold }]}>
-                <Text style={[styles.primaryBtnText, { color: "#071014" }]}>Sign in</Text>
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                  NCAT Email
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: "#FFFFFF",
+                      color: theme.text,
+                    },
+                  ]}
+                  placeholder="you@ncat.edu"
+                  placeholderTextColor={theme.muted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={setEmail}
+                />
               </View>
-            </PressableScale>
 
-            <View style={[styles.row, { marginTop: 10 }]}>
-              <Text style={{ color: theme.muted }}>No account yet?</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Signup")}>
-                <Text style={[styles.link, { color: theme.gold }]}>Create one</Text>
-              </TouchableOpacity>
+              <View style={styles.fieldGroup}>
+                <View style={styles.row}>
+                  <Text
+                    style={[styles.fieldLabel, { color: theme.muted }]}
+                  >
+                    Password
+                  </Text>
+                  <Text style={{ color: theme.muted, fontSize: 11 }}>
+                    At least 8 characters
+                  </Text>
+                </View>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: "#FFFFFF",
+                      color: theme.text,
+                    },
+                  ]}
+                  placeholder="••••••••"
+                  placeholderTextColor={theme.muted}
+                  secureTextEntry
+                  value={password}
+                  onChangeText={setPassword}
+                />
+              </View>
+
+              <PressableScale
+                onPress={tryLogin}
+                disabled={loading}
+                style={{ marginTop: 8 }}
+              >
+                <View
+                  style={[
+                    styles.primaryBtn,
+                    {
+                      backgroundColor: loading ? "#9CA3AF" : theme.accent,
+                      shadowColor: theme.shadow,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.primaryBtnText,
+                      { color: "#FFFFFF" },
+                    ]}
+                  >
+                    {loading ? "Signing in…" : "Sign in"}
+                  </Text>
+                </View>
+              </PressableScale>
+
+              <View
+                style={[
+                  styles.row,
+                  { marginTop: 16, justifyContent: "flex-start" },
+                ]}
+              >
+                <Text style={{ color: theme.muted, fontSize: 13 }}>
+                  Don&apos;t have an account?
+                </Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("Signup")}
+                >
+                  <Text
+                    style={[
+                      styles.link,
+                      { color: theme.accent, fontSize: 13 },
+                    ]}
+                  >
+                    {" "}
+                    Create one
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+
+            <View style={{ marginTop: 20 }}>
+              <PipelineStrip theme={theme} />
+            </View>
+          </ScrollView>
         </Animated.View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -153,42 +399,191 @@ function LoginScreen({ navigation, theme }) {
 }
 
 /* ---------------- SIGNUP ---------------- */
+
 function SignupScreen({ navigation, theme }) {
-  const fade = useFadeIn(420);
+  const fade = useFadeIn(320);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  const isNcat = (e) => !!e && e.toLowerCase().endsWith("@ncat.edu");
+  const [submitting, setSubmitting] = useState(false);
 
   const doSignup = async () => {
-    if (!name || !email || !password) return Alert.alert("All fields required.");
-    if (!isNcat(email)) return Alert.alert("Please use an @ncat.edu email.");
+    if (!name || !email || !password) {
+      return Alert.alert(
+        "Missing information",
+        "Please enter your name, NCAT email, and password."
+      );
+    }
 
-    const usersJson = await AsyncStorage.getItem("users");
-    const users = usersJson ? JSON.parse(usersJson) : [];
-    if (users.some((u) => u.email === email)) return Alert.alert("Account exists.");
+    if (!isNcat(email)) {
+      return Alert.alert(
+        "Invalid email",
+        "Aggie One Access only accepts @ncat.edu addresses."
+      );
+    }
 
-    const newUser = { id: Date.now().toString(), name, email, password, building: null, role: "professor", approved: false };
-    users.push(newUser);
-    await AsyncStorage.setItem("users", JSON.stringify(users));
-    await AsyncStorage.setItem("user", JSON.stringify(newUser));
-    navigation.replace("BuildingRole");
+    if (password.length < 8) {
+      return Alert.alert(
+        "Weak password",
+        "Password must be at least 8 characters."
+      );
+    }
+
+    setSubmitting(true);
+    const { data, error } = await signUpUser(email.trim(), password);
+
+    if (error) {
+      setSubmitting(false);
+      Alert.alert("Signup failed", error.message);
+      return;
+    }
+
+    try {
+      const newUser = {
+        id: data.user?.id ?? Date.now().toString(),
+        name,
+        email: email.trim(),
+        role: "professor",
+        building: null,
+        approved: false,
+      };
+      const usersJson = await AsyncStorage.getItem("users");
+      const users = usersJson ? JSON.parse(usersJson) : [];
+      users.push(newUser);
+      await AsyncStorage.setItem("users", JSON.stringify(users));
+    } catch (e) {
+      console.log("local signup store error", e);
+    }
+
+    setSubmitting(false);
+    Alert.alert(
+      "Account created",
+      "Your Aggie One Access account has been created. Please verify your email if required, then sign in.",
+      [{ text: "Go to Login", onPress: () => navigation.replace("Login") }]
+    );
   };
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
+      <StatusBar barStyle="dark-content" />
       <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader title="Aggie One Access — Register" subtitle="Create an enterprise account" theme={theme} />
-        <ScrollView contentContainerStyle={{ paddingVertical: 16 }}>
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <TextInput style={[styles.input, { backgroundColor: "#0b0b0b", color: theme.text }]} placeholder="Full name" placeholderTextColor={theme.muted} value={name} onChangeText={setName} />
-            <TextInput style={[styles.input, { backgroundColor: "#0b0b0b", color: theme.text }]} placeholder="NCAT EMAIL" placeholderTextColor={theme.muted} value={email} onChangeText={setEmail} autoCapitalize="none" />
-            <TextInput style={[styles.input, { backgroundColor: "#0b0b0b", color: theme.text }]} placeholder="Password" placeholderTextColor={theme.muted} secureTextEntry value={password} onChangeText={setPassword} />
+        <AppHeader
+          title="Create account"
+          subtitle="Set up your Aggie One Access profile"
+          theme={theme}
+          showBack={true}
+          navigation={navigation}
+        />
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Basic information
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              This information is used to connect you with building access
+              requests and approvals.
+            </Text>
 
-            <PressableScale onPress={doSignup}>
-              <View style={[styles.primaryBtn, { backgroundColor: theme.gold, marginTop: 10 }]}>
-                <Text style={[styles.primaryBtnText, { color: "#071014" }]}>Create account</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Full name
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="First Last"
+                placeholderTextColor={theme.muted}
+                value={name}
+                onChangeText={setName}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <View style={styles.row}>
+                <Text
+                  style={[styles.fieldLabel, { color: theme.muted }]}
+                >
+                  NCAT email
+                </Text>
+                <Tag
+                  label="@ncat.edu only"
+                  tone="info"
+                  theme={theme}
+                />
+              </View>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="you@ncat.edu"
+                placeholderTextColor={theme.muted}
+                autoCapitalize="none"
+                value={email}
+                onChangeText={setEmail}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Password
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="At least 8 characters"
+                placeholderTextColor={theme.muted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+            </View>
+
+            <PressableScale
+              onPress={doSignup}
+              disabled={submitting}
+              style={{ marginTop: 16 }}
+            >
+              <View
+                style={[
+                  styles.primaryBtn,
+                  {
+                    backgroundColor: submitting ? "#9CA3AF" : theme.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: "#FFFFFF" },
+                  ]}
+                >
+                  {submitting ? "Creating account…" : "Create account"}
+                </Text>
               </View>
             </PressableScale>
           </View>
@@ -198,17 +593,20 @@ function SignupScreen({ navigation, theme }) {
   );
 }
 
-/* ---------------- BUILDING ROLE ---------------- */
+/* ---------------- PROFILE / BUILDING ROLE ---------------- */
+
 function BuildingRoleScreen({ navigation, theme }) {
-  const fade = useFadeIn(420);
+  const fade = useFadeIn(320);
   const [building, setBuilding] = useState("");
   const [role, setRole] = useState("professor");
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
     (async () => {
       const uJson = await AsyncStorage.getItem("user");
       if (uJson) {
         const u = JSON.parse(uJson);
+        setCurrentUser(u);
         if (u.building) setBuilding(u.building);
         if (u.role) setRole(u.role);
       }
@@ -216,161 +614,481 @@ function BuildingRoleScreen({ navigation, theme }) {
   }, []);
 
   const saveProfile = async () => {
-    if (!building) return Alert.alert("Enter building.");
+    if (!building.trim()) {
+      return Alert.alert(
+        "Missing building",
+        "Please enter your primary building."
+      );
+    }
     const uJson = await AsyncStorage.getItem("user");
     const u = uJson ? JSON.parse(uJson) : null;
     if (!u) return Alert.alert("Error", "No user found.");
-    const updated = { ...u, building, role };
+
+    const updated = { ...u, building: building.trim(), role };
     await AsyncStorage.setItem("user", JSON.stringify(updated));
+
     const usersJson = await AsyncStorage.getItem("users");
     let users = usersJson ? JSON.parse(usersJson) : [];
     users = users.map((us) => (us.id === updated.id ? updated : us));
     await AsyncStorage.setItem("users", JSON.stringify(users));
-    navigation.replace("Home");
+
+    Alert.alert("Profile saved", "Your profile has been updated.");
+    navigation.goBack();
   };
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
       <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader title="Profile & Access" subtitle="Set building and role" theme={theme} />
-        <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <TextInput style={[styles.input, { backgroundColor: "#0b0b0b", color: theme.text }]} placeholder="Building (e.g., McNair Hall)" placeholderTextColor={theme.muted} value={building} onChangeText={setBuilding} />
-          <Text style={[styles.label, { color: theme.muted }]}>Select role</Text>
-          <View style={styles.roleRow}>
-            {["professor", "researcher", "admin"].map((r) => (
-              <TouchableOpacity
-                key={r}
-                style={[
-                  styles.roleBtn,
-                  role === r ? { backgroundColor: theme.gold, borderColor: theme.gold } : { borderColor: theme.border, backgroundColor: theme.card },
-                ]}
-                onPress={() => setRole(r)}
-              >
-                <Text style={{ color: role === r ? "#071014" : theme.text, fontWeight: role === r ? "900" : "700" }}>
-                  {r.charAt(0).toUpperCase() + r.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        <AppHeader
+          title="Profile"
+          subtitle="Role and primary building"
+          theme={theme}
+          showBack={true}
+          navigation={navigation}
+        />
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Account
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Details used to connect your requests to the appropriate building
+              and approver.
+            </Text>
 
-          <PressableScale onPress={saveProfile}>
-            <View style={[styles.primaryBtn, { backgroundColor: theme.gold, marginTop: 12 }]}>
-              <Text style={[styles.primaryBtnText, { color: "#071014" }]}>Save & Continue</Text>
+            {currentUser && (
+              <View style={{ marginTop: 8, marginBottom: 16 }}>
+                <Text
+                  style={{ color: theme.muted, fontSize: 12, marginBottom: 2 }}
+                >
+                  Signed in as
+                </Text>
+                <Text
+                  style={{
+                    color: theme.text,
+                    fontWeight: "600",
+                    marginBottom: 2,
+                  }}
+                >
+                  {currentUser.name}
+                </Text>
+                <Text style={{ color: theme.muted }}>
+                  {currentUser.email}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Primary building
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="e.g., McNair Hall"
+                placeholderTextColor={theme.muted}
+                value={building}
+                onChangeText={setBuilding}
+              />
             </View>
-          </PressableScale>
-        </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Role
+              </Text>
+              <View style={styles.roleRow}>
+                {["professor", "researcher", "admin"].map((r) => {
+                  const active = role === r;
+                  return (
+                    <TouchableOpacity
+                      key={r}
+                      onPress={() => setRole(r)}
+                      style={[
+                        styles.roleBtn,
+                        {
+                          borderColor: active ? theme.accent : theme.border,
+                          backgroundColor: active
+                            ? "rgba(0,51,153,0.08)"
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: active ? theme.accent : theme.text,
+                          fontWeight: active ? "700" : "500",
+                        }}
+                      >
+                        {r.charAt(0).toUpperCase() + r.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <PressableScale onPress={saveProfile} style={{ marginTop: 16 }}>
+              <View
+                style={[
+                  styles.primaryBtn,
+                  { backgroundColor: theme.accent },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: "#FFFFFF" },
+                  ]}
+                >
+                  Save profile
+                </Text>
+              </View>
+            </PressableScale>
+          </View>
+        </ScrollView>
       </Animated.View>
     </SafeAreaView>
   );
 }
 
-/* ---------------- REQUEST FORM (fixed examples chips) ---------------- */
+/* ---------------- REQUEST FORM ---------------- */
+
 function RequestFormScreen({ navigation, theme }) {
-  const fade = useFadeIn(380);
+  const fade = useFadeIn(320);
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
+  const [building, setBuilding] = useState("");
+  const [room, setRoom] = useState("");
+  const [timeWindow, setTimeWindow] = useState("");
+  const [semester, setSemester] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // cleaned examples, no hyphens, longer chip width, wrapping support
   const examples = [
-    { title: "Library After Hours Access", details: "Request extended library access during finals week (Dec 8–14)." },
-    { title: "Reserve Quiet Study Room", details: "Reserve a quiet study room for 4 students each Friday evening." },
-    { title: "Counseling Appointment Request", details: "Request counseling support for academic stress and time management." },
-    { title: "Temporary Lab Access", details: "Request temporary lab access for research equipment calibration." },
-    { title: "Event Space Reservation", details: "Reserve auditorium for guest lecture on campus innovation." },
+    {
+      title: "Extended lab access",
+      details:
+        "Request extended key card access for senior design students after 6PM.",
+      building: "McNair Hall",
+      room: "Lab 220",
+    },
+    {
+      title: "Evening study space",
+      details:
+        "Reserve quiet study space during finals week for ECE majors.",
+      building: "Bluford Library",
+      room: "3rd Floor Quiet Zone",
+    },
+    {
+      title: "Counseling appointment block",
+      details:
+        "Reserve recurring appointment times for student counseling sessions.",
+      building: "Murphy Hall",
+      room: "Suite 120",
+    },
   ];
 
-  const applyExample = (ex) => {
-    setTitle(ex.title);
-    setDetails(ex.details);
+  const applyExample = (example) => {
+    setTitle(example.title);
+    setDetails(example.details);
+    setBuilding(example.building || "");
+    setRoom(example.room || "");
   };
 
   const submit = async () => {
-    if (!title.trim() || !details.trim()) return Alert.alert("Please complete title and details.");
+    if (!title.trim() || !details.trim() || !building.trim() || !semester.trim()) {
+      return Alert.alert(
+        "Incomplete request",
+        "Please enter a title, building, description, and semester."
+      );
+    }
     setSubmitting(true);
     try {
       const uJson = await AsyncStorage.getItem("user");
-      const user = uJson ? JSON.parse(uJson) : { name: "Unknown", email: "unknown@ncat.edu" };
-      const req = {
+      const user =
+        uJson != null
+          ? JSON.parse(uJson)
+          : { name: "Unknown", email: "unknown@ncat.edu" };
+
+      const request = {
         id: Date.now().toString(),
         title: title.trim(),
         details: details.trim(),
+        building: building.trim(),
+        room: room.trim(),
+        timeWindow: timeWindow.trim(),
+        semester: semester.trim(),
         name: user.name,
         email: user.email,
         status: "Pending",
         timestamp: new Date().toISOString(),
         priority: "Normal",
       };
-      const reqsJson = await AsyncStorage.getItem("requests");
-      const reqs = reqsJson ? JSON.parse(reqsJson) : [];
-      reqs.unshift(req);
-      await AsyncStorage.setItem("requests", JSON.stringify(reqs));
 
-      // simulate approval flow
+      const reqsJson = await AsyncStorage.getItem("requests");
+      const existing = reqsJson ? JSON.parse(reqsJson) : [];
+      existing.unshift(request);
+      await AsyncStorage.setItem("requests", JSON.stringify(existing));
+
+      // Simulated pipeline: under review, then approved/rejected
       setTimeout(async () => {
         const r1 = (await AsyncStorage.getItem("requests")) || "[]";
         const arr1 = JSON.parse(r1);
-        const updated1 = arr1.map((r) => (r.id === req.id ? { ...r, status: "Under review" } : r));
+        const updated1 = arr1.map((r) =>
+          r.id === request.id ? { ...r, status: "Under review" } : r
+        );
         await AsyncStorage.setItem("requests", JSON.stringify(updated1));
 
         setTimeout(async () => {
-          const approve = Math.random() < 0.82; // slightly higher approval
-          const final = approve ? "Approved" : "Rejected";
+          const approve = Math.random() < 0.8;
+          const finalStatus = approve ? "Approved" : "Rejected";
           const r2 = (await AsyncStorage.getItem("requests")) || "[]";
           const arr2 = JSON.parse(r2);
-          const updated2 = arr2.map((r) => (r.id === req.id ? { ...r, status: final } : r));
+          const updated2 = arr2.map((r) =>
+            r.id === request.id ? { ...r, status: finalStatus } : r
+          );
           await AsyncStorage.setItem("requests", JSON.stringify(updated2));
           setSubmitting(false);
-          navigation.replace("Requests");
-        }, 2600);
-      }, 1600);
+
+          Alert.alert(
+            "Request submitted",
+            "Your request has entered the review process.",
+            [
+              {
+                text: "View requests",
+                onPress: () => navigation.navigate("Requests"),
+              },
+              {
+                text: "Back to home",
+                style: "cancel",
+                onPress: () => navigation.navigate("Home"),
+              },
+            ]
+          );
+        }, 2000);
+      }, 1000);
 
       setTitle("");
       setDetails("");
+      setBuilding("");
+      setRoom("");
+      setTimeWindow("");
+      setSemester("");
     } catch (e) {
       console.log("submit error", e);
-      Alert.alert("Error", "Could not submit request.");
       setSubmitting(false);
+      Alert.alert("Error", "Could not submit request. Please try again.");
     }
   };
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
       <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader title="New Request" subtitle="Create a premium access request" theme={theme} />
-        <ScrollView contentContainerStyle={{ paddingVertical: 14 }}>
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.label, { color: theme.muted }]}>Quick examples</Text>
+        <AppHeader
+          title="New request"
+          subtitle="Submit a building access request"
+          theme={theme}
+          showBack={true}
+          navigation={navigation}
+        />
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Request details
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              These fields feed into the access file for Aggie One and building
+              approvers.
+            </Text>
 
-            {/* examples row: flexible wrapping chips, larger minWidth so longer titles fit */}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 8 }}>
-              {examples.map((ex, i) => (
-                <TouchableOpacity key={i} onPress={() => applyExample(ex)} activeOpacity={0.85}>
-                  <View style={[styles.exampleChipPremium]}>
-                    <Text numberOfLines={2} style={{ color: "#0b0b0b", fontWeight: "700", maxWidth: 220 }}>
+            <Text style={[styles.fieldLabel, { color: theme.muted, marginTop: 8 }]}>
+              Example templates
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginTop: 4 }}
+            >
+              {examples.map((ex) => (
+                <PressableScale
+                  key={ex.title}
+                  onPress={() => applyExample(ex)}
+                  style={{ marginRight: 8 }}
+                >
+                  <View style={styles.exampleChip}>
+                    <Text
+                      numberOfLines={2}
+                      style={{
+                        color: theme.accent,
+                        fontWeight: "600",
+                        fontSize: 12,
+                        maxWidth: 200,
+                      }}
+                    >
                       {ex.title}
                     </Text>
                   </View>
-                </TouchableOpacity>
+                </PressableScale>
               ))}
+            </ScrollView>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Title
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="Short label for this request"
+                placeholderTextColor={theme.muted}
+                value={title}
+                onChangeText={setTitle}
+              />
             </View>
 
-            <Text style={[styles.label, { color: theme.muted, marginTop: 12 }]}>Title</Text>
-            <TextInput style={[styles.input, { minHeight: 44, backgroundColor: "#070708", color: theme.text }]} value={title} onChangeText={setTitle} placeholder="Short title" placeholderTextColor={theme.muted} />
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Building
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="e.g., McNair Hall"
+                placeholderTextColor={theme.muted}
+                value={building}
+                onChangeText={setBuilding}
+              />
+            </View>
 
-            <Text style={[styles.label, { color: theme.muted }]}>Details</Text>
-            <TextInput
-              style={[styles.input, { minHeight: 120, textAlignVertical: "top", backgroundColor: "#070708", color: theme.text }]}
-              value={details}
-              onChangeText={setDetails}
-              placeholder="Describe the request and justification"
-              placeholderTextColor={theme.muted}
-              multiline
-            />
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Room (optional)
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="e.g., Lab 220"
+                placeholderTextColor={theme.muted}
+                value={room}
+                onChangeText={setRoom}
+              />
+            </View>
 
-            <PressableScale onPress={submit} style={{ marginTop: 12 }}>
-              <View style={[styles.primaryBtn, { backgroundColor: theme.gold }]}>
-                <Text style={[styles.primaryBtnText, { color: "#071014" }]}>{submitting ? "Submitting..." : "Submit Request"}</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Time window (optional)
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="e.g., 6PM–11PM, Mon–Thu"
+                placeholderTextColor={theme.muted}
+                value={timeWindow}
+                onChangeText={setTimeWindow}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Semester
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="e.g., Spring 2026"
+                placeholderTextColor={theme.muted}
+                value={semester}
+                onChangeText={setSemester}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
+                Description
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    color: theme.text,
+                    borderColor: theme.border,
+                    minHeight: 90,
+                    textAlignVertical: "top",
+                  },
+                ]}
+                multiline
+                placeholder="Describe the purpose, who needs access, and any special conditions."
+                placeholderTextColor={theme.muted}
+                value={details}
+                onChangeText={setDetails}
+              />
+            </View>
+
+            <PressableScale
+              onPress={submit}
+              disabled={submitting}
+              style={{ marginTop: 16 }}
+            >
+              <View
+                style={[
+                  styles.primaryBtn,
+                  { backgroundColor: submitting ? "#9CA3AF" : theme.accent },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: "#FFFFFF" },
+                  ]}
+                >
+                  {submitting ? "Submitting…" : "Submit request"}
+                </Text>
               </View>
             </PressableScale>
           </View>
@@ -381,12 +1099,35 @@ function RequestFormScreen({ navigation, theme }) {
 }
 
 /* ---------------- REQUESTS HISTORY ---------------- */
+
 function RequestsScreen({ navigation, theme }) {
   const [reqs, setReqs] = useState([]);
+  const [filtered, setFiltered] = useState([]);
+  const [filter, setFilter] = useState("all");
 
   const load = async () => {
     const json = await AsyncStorage.getItem("requests");
-    setReqs(json ? JSON.parse(json) : []);
+    const list = json ? JSON.parse(json) : [];
+    setReqs(list);
+    applyFilter(filter, list);
+  };
+
+  const applyFilter = (mode, listOverride) => {
+    const base = listOverride ?? reqs;
+    let out = base;
+    if (mode === "pending") {
+      out = base.filter(
+        (r) => r.status === "Pending" || r.status === "Under review"
+      );
+    } else if (mode === "approved") {
+      out = base.filter(
+        (r) => r.status === "Approved" || r.status === "Approved by Chair"
+      );
+    } else if (mode === "rejected") {
+      out = base.filter((r) => r.status === "Rejected");
+    }
+    setFilter(mode);
+    setFiltered(out);
   };
 
   useEffect(() => {
@@ -395,40 +1136,176 @@ function RequestsScreen({ navigation, theme }) {
     return unsub;
   }, [navigation]);
 
-  const renderItem = ({ item }) => (
-    <View style={[styles.card, { marginBottom: 12, backgroundColor: theme.card }]}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ color: theme.text, fontWeight: "800" }}>{item.title}</Text>
-        <Text style={{ color: theme.muted, fontSize: 12 }}>{new Date(item.timestamp).toLocaleString()}</Text>
-      </View>
-      <Text style={{ color: theme.muted, marginTop: 6 }}>{item.name} · {item.email}</Text>
-      <Text style={{ color: theme.muted, marginTop: 8 }}>{item.details}</Text>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
-        <View style={[styles.statusPill, { backgroundColor: item.status === "Approved" ? "#08243a" : item.status === "Rejected" ? "#2b0a0a" : "#1a1a1a", borderColor: item.status === "Approved" ? "#0a6fb9" : item.status === "Rejected" ? "#d14b4b" : "#333" }]}>
-          <Text style={{ color: theme.goldMuted, fontWeight: "800" }}>{item.status}</Text>
+  const renderItem = ({ item }) => {
+    let tone = "pending";
+    if (item.status === "Approved" || item.status === "Approved by Chair") {
+      tone = "success";
+    } else if (item.status === "Rejected") {
+      tone = "danger";
+    }
+
+    return (
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: theme.surface,
+            borderColor: theme.border,
+            marginBottom: 12,
+          },
+        ]}
+      >
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <Text
+            style={{
+              color: theme.text,
+              fontWeight: "600",
+              flex: 1,
+              marginRight: 8,
+            }}
+          >
+            {item.title}
+          </Text>
+          <Text style={{ color: theme.muted, fontSize: 11 }}>
+            {new Date(item.timestamp).toLocaleString()}
+          </Text>
         </View>
-        <Text style={{ color: theme.muted }}>Priority: {item.priority || "Normal"}</Text>
+
+        <Text
+          style={{
+            color: theme.muted,
+            marginTop: 4,
+            fontSize: 13,
+          }}
+        >
+          {item.building}
+          {item.room ? ` • ${item.room}` : ""}
+        </Text>
+
+        <Text
+          style={{
+            color: theme.muted,
+            marginTop: 6,
+            fontSize: 13,
+          }}
+        >
+          {item.details}
+        </Text>
+
+        <View
+          style={{
+            marginTop: 10,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Tag label={item.status} tone={tone} theme={theme} />
+            {item.semester ? (
+              <Tag
+                label={item.semester}
+                tone="info"
+                theme={theme}
+              />
+            ) : null}
+          </View>
+          <Text style={{ color: theme.muted, fontSize: 12 }}>
+            {item.name}
+          </Text>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
+
+  const activeStyle = (mode) =>
+    filter === mode
+      ? {
+          backgroundColor: "rgba(0,51,153,0.08)",
+          borderColor: theme.accent,
+        }
+      : {
+          backgroundColor: "#FFFFFF",
+          borderColor: theme.border,
+        };
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <Animated.View style={[styles.container, { opacity: useFadeIn(300) }]}>
-        <AppHeader title="Requests History" subtitle="All submitted requests" theme={theme} />
-        {reqs.length === 0 ? (
-          <Text style={{ color: theme.muted, textAlign: "center", marginTop: 20 }}>No requests yet.</Text>
+      <Animated.View style={[styles.container, { opacity: useFadeIn(260) }]}>
+        <AppHeader
+          title="Requests"
+          subtitle="History of submitted requests"
+          theme={theme}
+          showBack={true}
+          navigation={navigation}
+        />
+
+        <View style={{ marginBottom: 10 }}>
+          <Text
+            style={{
+              color: theme.muted,
+              fontSize: 13,
+              marginBottom: 6,
+            }}
+          >
+            Filter by status
+          </Text>
+          <View style={{ flexDirection: "row" }}>
+            <TouchableOpacity
+              style={[styles.filterChip, activeStyle("all")]}
+              onPress={() => applyFilter("all")}
+            >
+              <Text style={{ color: theme.text, fontSize: 12 }}>All</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterChip, activeStyle("pending")]}
+              onPress={() => applyFilter("pending")}
+            >
+              <Text style={{ color: theme.text, fontSize: 12 }}>Pending</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterChip, activeStyle("approved")]}
+              onPress={() => applyFilter("approved")}
+            >
+              <Text style={{ color: theme.text, fontSize: 12 }}>Approved</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterChip, activeStyle("rejected")]}
+              onPress={() => applyFilter("rejected")}
+            >
+              <Text style={{ color: theme.text, fontSize: 12 }}>Rejected</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {filtered.length === 0 ? (
+          <Text
+            style={{
+              color: theme.muted,
+              textAlign: "center",
+              marginTop: 20,
+              fontSize: 13,
+            }}
+          >
+            No requests match this filter yet.
+          </Text>
         ) : (
-          <FlatList data={reqs} keyExtractor={(i) => i.id} renderItem={renderItem} contentContainerStyle={{ paddingBottom: 40 }} />
+          <FlatList
+            data={filtered}
+            keyExtractor={(i) => i.id}
+            renderItem={renderItem}
+            contentContainerStyle={{ paddingBottom: 40 }}
+          />
         )}
       </Animated.View>
     </SafeAreaView>
   );
 }
 
-/* ---------------- ADMIN DASHBOARD (Luxury KPIs) ---------------- */
+/* ---------------- ADMIN PANEL ---------------- */
+
 function AdminPanel({ navigation, theme }) {
-  const fade = useFadeIn(350);
+  const fade = useFadeIn(260);
   const [pending, setPending] = useState([]);
   const [requests, setRequests] = useState([]);
   const [banner, setBanner] = useState(null);
@@ -456,83 +1333,197 @@ function AdminPanel({ navigation, theme }) {
     users = users.map((u) => (u.id === id ? { ...u, approved: true } : u));
     await AsyncStorage.setItem("users", JSON.stringify(users));
 
-    // mark related requests as Approved by Chair
     const reqsJson = await AsyncStorage.getItem("requests");
     let reqs = reqsJson ? JSON.parse(reqsJson) : [];
-    reqs = reqs.map((r) => (r.email === userToApprove.email ? { ...r, status: "Approved by Chair" } : r));
+    reqs = reqs.map((r) =>
+      r.email === userToApprove.email ? { ...r, status: "Approved by Chair" } : r
+    );
     await AsyncStorage.setItem("requests", JSON.stringify(reqs));
 
     setBanner(`Approved ${userToApprove.name}`);
-    setTimeout(() => setBanner(null), 2600);
+    setTimeout(() => setBanner(null), 2500);
     loadAll();
   };
 
-  // KPI computations
   const totals = {
     totalRequests: requests.length,
-    approved: requests.filter((r) => r.status === "Approved" || r.status === "Approved by Chair").length,
+    approved: requests.filter(
+      (r) => r.status === "Approved" || r.status === "Approved by Chair"
+    ).length,
     rejected: requests.filter((r) => r.status === "Rejected").length,
-    pending: requests.filter((r) => r.status === "Pending" || r.status === "Under review").length,
+    pending: requests.filter(
+      (r) => r.status === "Pending" || r.status === "Under review"
+    ).length,
   };
 
-  // estimate avg review time (simulated)
-  const avgReviewMinutes = requests.length ? Math.round((requests.length * 20) / Math.max(1, totals.approved)) : 0; // fake metric
-  const slaCompliance = totals.totalRequests ? Math.round(((totals.approved + 0.5 * totals.pending) / totals.totalRequests) * 100) : 0;
-  const approvalRate = totals.totalRequests ? Math.round((totals.approved / totals.totalRequests) * 100) : 0;
+  const approvalRate = totals.totalRequests
+    ? Math.round((totals.approved / totals.totalRequests) * 100)
+    : 0;
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
       {banner && (
-        <View style={{ backgroundColor: "#111212", padding: 10, alignItems: "center", borderBottomWidth: 1, borderColor: theme.border }}>
-          <Text style={{ color: theme.goldMuted, fontWeight: "700" }}>{banner}</Text>
+        <View style={styles.banner}>
+          <Text style={{ color: theme.accent, fontWeight: "600" }}>
+            {banner}
+          </Text>
         </View>
       )}
       <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader title="Admin Console" subtitle="Executive overview • Premium" theme={theme} />
-        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
-          {/* KPI Tiles */}
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.cardTitle, { color: theme.gold }]}>Executive KPIs</Text>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 12 }}>
-              <View style={styles.kpiTile}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>Requests Today</Text>
-                <Text style={{ color: theme.text, fontSize: 22, fontWeight: "900" }}>{totals.totalRequests}</Text>
+        <AppHeader
+          title="Admin"
+          subtitle="Overview of access activity"
+          theme={theme}
+          showBack={true}
+          navigation={navigation}
+        />
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                marginBottom: 12,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Summary
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Snapshot of building access requests in the current dataset.
+            </Text>
+
+            <View style={styles.kpiRow}>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Total
+                </Text>
+                <Text style={styles.kpiValue}>{totals.totalRequests}</Text>
               </View>
-              <View style={styles.kpiTile}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>Avg Review (min)</Text>
-                <Text style={{ color: theme.text, fontSize: 22, fontWeight: "900" }}>{avgReviewMinutes}</Text>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Pending
+                </Text>
+                <Text style={[styles.kpiValue, { color: theme.pending }]}>
+                  {totals.pending}
+                </Text>
               </View>
-              <View style={styles.kpiTile}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>SLA Compliance</Text>
-                <Text style={{ color: theme.text, fontSize: 22, fontWeight: "900" }}>{slaCompliance}%</Text>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Approved
+                </Text>
+                <Text style={[styles.kpiValue, { color: theme.success }]}>
+                  {totals.approved}
+                </Text>
+              </View>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Rejected
+                </Text>
+                <Text style={[styles.kpiValue, { color: theme.danger }]}>
+                  {totals.rejected}
+                </Text>
               </View>
             </View>
 
-            {/* slim approval gauge (visual) */}
-            <View style={{ marginTop: 14 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                <Text style={{ color: theme.muted }}>Approval Rate</Text>
-                <Text style={{ color: theme.muted }}>{approvalRate}%</Text>
+            <View style={{ marginTop: 12 }}>
+              <Text
+                style={{
+                  color: theme.muted,
+                  fontSize: 12,
+                  marginBottom: 4,
+                }}
+              >
+                Approval rate
+              </Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      width: `${approvalRate}%`,
+                      backgroundColor: theme.accent,
+                    },
+                  ]}
+                />
               </View>
-              <View style={{ height: 12, backgroundColor: "#070708", borderRadius: 8, overflow: "hidden" }}>
-                <View style={{ width: `${approvalRate}%`, height: 12, backgroundColor: "#00bcd4", borderRadius: 8 }} />
-              </View>
+              <Text
+                style={{
+                  color: theme.muted,
+                  fontSize: 12,
+                  marginTop: 4,
+                }}
+              >
+                {approvalRate}% of submitted requests approved
+              </Text>
             </View>
           </View>
 
-          {/* pending approvals */}
-          <View style={[styles.card, { marginTop: 12, backgroundColor: theme.card }]}>
-            <Text style={[styles.cardTitle, { color: theme.gold }]}>Pending Approvals</Text>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Pending approvals
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Users waiting for chair approval.
+            </Text>
+
             {pending.length === 0 ? (
-              <Text style={{ color: theme.muted, marginTop: 8 }}>No pending users — all clear.</Text>
+              <Text
+                style={{
+                  color: theme.muted,
+                  marginTop: 12,
+                  fontSize: 13,
+                }}
+              >
+                No pending users at this time.
+              </Text>
             ) : (
               pending.map((u) => (
-                <View key={u.id} style={{ marginTop: 8 }}>
-                  <Text style={{ fontWeight: "900", color: theme.text }}>{u.name}</Text>
-                  <Text style={{ color: theme.muted }}>{u.email}</Text>
-                  <PressableScale onPress={() => approve(u.id)} style={{ marginTop: 8 }}>
-                    <View style={[styles.primaryBtn, { backgroundColor: theme.gold }]}>
-                      <Text style={[styles.primaryBtnText, { color: "#071014" }]}>Approve</Text>
+                <View
+                  key={u.id}
+                  style={{
+                    paddingVertical: 10,
+                    borderBottomWidth: 0.5,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontWeight: "500",
+                      marginBottom: 2,
+                    }}
+                  >
+                    {u.name}
+                  </Text>
+                  <Text
+                    style={{ color: theme.muted, fontSize: 13, marginBottom: 6 }}
+                  >
+                    {u.email}
+                  </Text>
+                  <PressableScale onPress={() => approve(u.id)}>
+                    <View
+                      style={[
+                        styles.primaryBtnSmall,
+                        { backgroundColor: theme.accent },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: "#FFFFFF",
+                          fontWeight: "600",
+                          fontSize: 13,
+                        }}
+                      >
+                        Approve
+                      </Text>
                     </View>
                   </PressableScale>
                 </View>
@@ -540,9 +1531,25 @@ function AdminPanel({ navigation, theme }) {
             )}
           </View>
 
-          <PressableScale onPress={() => navigation.navigate("Requests")} style={{ marginTop: 12 }}>
-            <View style={[styles.ghostBtn, { alignItems: "center" }]}>
-              <Text style={[styles.ghostBtnText, { color: theme.gold }]}>View full requests</Text>
+          <PressableScale
+            onPress={() => navigation.navigate("Requests")}
+            style={{ marginTop: 16 }}
+          >
+            <View
+              style={[
+                styles.secondaryBtn,
+                { borderColor: theme.border },
+              ]}
+            >
+              <Text
+                style={{
+                  color: theme.accent,
+                  fontWeight: "500",
+                  fontSize: 14,
+                }}
+              >
+                View full request history
+              </Text>
             </View>
           </PressableScale>
         </ScrollView>
@@ -551,107 +1558,269 @@ function AdminPanel({ navigation, theme }) {
   );
 }
 
-/* ---------------- HOME (parallax + premium OneCard) ---------------- */
-function PremiumOneCard({ user, theme }) {
-  const glow = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glow, { toValue: 1, duration: 2200, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-        Animated.timing(glow, { toValue: 0, duration: 2200, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-      ])
-    ).start();
-  }, []);
-
-  const glowInterp = glow.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["rgba(255,215,0,0.06)", "rgba(0,255,213,0.08)"],
-  });
-
-  return (
-    <Animated.View style={[styles.onecardPremium, { backgroundColor: "#050505", shadowColor: theme.gold, borderColor: "#131313", borderWidth: 1, boxShadow: 'none' }]}>
-      <Animated.View style={{ position: "absolute", top: -12, left: -20, right: -20, height: 44, backgroundColor: glowInterp, borderRadius: 200, opacity: 0.5 }} pointerEvents="none" />
-      <Text style={{ color: theme.gold, fontSize: 20, fontWeight: "900" }}>AGGIE ELITE</Text>
-      <Text style={{ color: theme.text, marginTop: 10, fontWeight: "800", fontSize: 16 }}>{user?.name || "Student Name"}</Text>
-      <Text style={{ color: theme.muted, marginTop: 4 }}>{user?.email || "example@ncat.edu"}</Text>
-
-      <View style={{ marginTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <View>
-          <Text style={{ color: theme.muted, fontSize: 10 }}>Card ID</Text>
-          <Text style={{ color: theme.text, fontWeight: "900" }}>{user?.id?.slice(-6) || "000000"}</Text>
-        </View>
-
-        <View style={{ alignItems: "center" }}>
-          <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: "#071014" }}>
-            <Text style={{ color: theme.gold, fontWeight: "900" }}>ONECARD</Text>
-          </View>
-          <View style={{ marginTop: 8 }}>
-            <Text style={{ color: theme.muted, fontSize: 10 }}>Access</Text>
-            <Text style={{ color: theme.text, fontWeight: "800" }}>Active</Text>
-          </View>
-        </View>
-      </View>
-    </Animated.View>
-  );
-}
+/* ---------------- HOME ---------------- */
 
 function HomeScreen({ navigation, theme }) {
   const scrollY = useRef(new Animated.Value(0)).current;
-  const fade = useFadeIn(420);
+  const fade = useFadeIn(300);
   const [user, setUser] = useState(null);
+  const [stats, setStats] = useState({
+    totalRequests: 0,
+    pendingRequests: 0,
+    approvedRequests: 0,
+  });
 
   useEffect(() => {
     (async () => {
       const uJson = await AsyncStorage.getItem("user");
       if (uJson) setUser(JSON.parse(uJson));
+
+      const rJson = await AsyncStorage.getItem("requests");
+      const list = rJson ? JSON.parse(rJson) : [];
+      const total = list.length;
+      const pending = list.filter(
+        (r) => r.status === "Pending" || r.status === "Under review"
+      ).length;
+      const approved = list.filter(
+        (r) => r.status === "Approved" || r.status === "Approved by Chair"
+      ).length;
+      setStats({
+        totalRequests: total,
+        pendingRequests: pending,
+        approvedRequests: approved,
+      });
     })();
   }, []);
 
   const logout = async () => {
+    await signOutUser().catch(() => {});
     await AsyncStorage.removeItem("user");
     navigation.replace("Login");
   };
 
+  const headerTranslate = scrollY.interpolate({
+    inputRange: [0, 40],
+    outputRange: [0, -10],
+    extrapolate: "clamp",
+  });
+
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
+      <StatusBar barStyle="dark-content" />
       <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader title="Aggie Elite Access" subtitle={`Welcome${user ? `, ${user.name.split(" ")[0]}` : ""}`} theme={theme} scrollY={scrollY} right={
-          <TouchableOpacity onPress={() => navigation.navigate("Requests")}>
-            <Text style={{ color: theme.gold, fontWeight: "900" }}>Requests</Text>
-          </TouchableOpacity>
-        } />
+        <Animated.View style={{ transform: [{ translateY: headerTranslate }] }}>
+          <AppHeader
+            title="Aggie One Access"
+            subtitle={
+              user
+                ? `Welcome, ${user.name.split(" ")[0]}`
+                : "Manage building access requests"
+            }
+            theme={theme}
+            showBack={false}
+            navigation={navigation}
+            right={
+              <TouchableOpacity onPress={() => navigation.navigate("Requests")}>
+                <Text
+                  style={{
+                    color: theme.accent,
+                    fontWeight: "500",
+                    fontSize: 14,
+                  }}
+                >
+                  Requests
+                </Text>
+              </TouchableOpacity>
+            }
+          />
+        </Animated.View>
 
         <Animated.ScrollView
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: 80 }}
           scrollEventThrottle={16}
-          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: false }
+          )}
         >
-          <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
-            <PremiumOneCard user={user} theme={theme} />
+          {/* Profile summary */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                marginBottom: 12,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Your summary
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Quick view of your activity in Aggie One Access.
+            </Text>
 
-            <View style={{ marginTop: 14 }}>
-              <PressableScale onPress={() => navigation.navigate("RequestForm")}>
-                <View style={[styles.primaryBtn, { backgroundColor: theme.gold }]}>
-                  <Text style={[styles.primaryBtnText, { color: "#071014" }]}>New Premium Request</Text>
-                </View>
-              </PressableScale>
+            <View style={styles.profileRow}>
+              <View style={styles.profileCircle}>
+                <Text style={{ color: "#FFFFFF", fontWeight: "600" }}>
+                  {user?.name?.[0]?.toUpperCase() || "A"}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: theme.text,
+                    fontWeight: "600",
+                    marginBottom: 2,
+                  }}
+                >
+                  {user?.name || "Faculty member"}
+                </Text>
+                <Text style={{ color: theme.muted, fontSize: 13 }}>
+                  {user?.email || "you@ncat.edu"}
+                </Text>
+              </View>
             </View>
 
-            <View style={{ marginTop: 12 }}>
-              <PressableScale onPress={() => navigation.navigate("BuildingRole")}>
-                <View style={[styles.ghostBtn, { borderColor: theme.border }]}>
-                  <Text style={[styles.ghostBtnText, { color: theme.gold }]}>Edit Profile</Text>
-                </View>
-              </PressableScale>
+            <View style={styles.kpiRow}>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Requests
+                </Text>
+                <Text style={styles.kpiValue}>{stats.totalRequests}</Text>
+              </View>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Pending
+                </Text>
+                <Text
+                  style={[styles.kpiValue, { color: theme.pending }]}
+                >
+                  {stats.pendingRequests}
+                </Text>
+              </View>
+              <View style={styles.kpiCard}>
+                <Text style={{ color: theme.muted, fontSize: 12 }}>
+                  Approved
+                </Text>
+                <Text
+                  style={[styles.kpiValue, { color: theme.success }]}
+                >
+                  {stats.approvedRequests}
+                </Text>
+              </View>
             </View>
+          </View>
 
-            <View style={{ marginTop: 12 }}>
-              <PressableScale onPress={logout}>
-                <View style={[styles.primaryBtn, { backgroundColor: "#0a0d10" }]}>
-                  <Text style={[styles.primaryBtnText, { color: theme.gold }]}>Sign out</Text>
-                </View>
-              </PressableScale>
-            </View>
+          {/* Actions */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                marginBottom: 12,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Actions
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Create and review access requests, or update your profile.
+            </Text>
+
+            <PressableScale
+              onPress={() => navigation.navigate("RequestForm")}
+              style={{ marginTop: 12 }}
+            >
+              <View
+                style={[
+                  styles.primaryBtn,
+                  {
+                    backgroundColor: theme.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: "#FFFFFF" },
+                  ]}
+                >
+                  New request
+                </Text>
+              </View>
+            </PressableScale>
+
+            <PressableScale
+              onPress={() => navigation.navigate("Requests")}
+              style={{ marginTop: 10 }}
+            >
+              <View style={styles.secondaryBtn}>
+                <Text
+                  style={{
+                    color: theme.accent,
+                    fontWeight: "500",
+                    fontSize: 14,
+                  }}
+                >
+                  View requests
+                </Text>
+              </View>
+            </PressableScale>
+
+            <PressableScale
+              onPress={() => navigation.navigate("BuildingRole")}
+              style={{ marginTop: 10 }}
+            >
+              <View style={styles.secondaryBtn}>
+                <Text
+                  style={{
+                    color: theme.accent,
+                    fontWeight: "500",
+                    fontSize: 14,
+                  }}
+                >
+                  Edit profile
+                </Text>
+              </View>
+            </PressableScale>
+
+            <PressableScale onPress={logout} style={{ marginTop: 10 }}>
+              <View style={styles.secondaryBtn}>
+                <Text
+                  style={{
+                    color: theme.danger,
+                    fontWeight: "500",
+                    fontSize: 14,
+                  }}
+                >
+                  Sign out
+                </Text>
+              </View>
+            </PressableScale>
+          </View>
+
+          {/* Pipeline explanation */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              How requests move through Aggie One Access
+            </Text>
+            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
+              Requests follow a consistent process so faculty, staff, and
+              students know what to expect.
+            </Text>
+            <PipelineStrip theme={theme} />
           </View>
         </Animated.ScrollView>
       </Animated.View>
@@ -660,9 +1829,11 @@ function HomeScreen({ navigation, theme }) {
 }
 
 /* ---------------- APP ROOT ---------------- */
+
 export default function App() {
+  const [session, setSession] = useState(null);
   const deviceScheme = useColorScheme();
-  const [scheme, setScheme] = useState(deviceScheme || "dark");
+  const [scheme, setScheme] = useState(deviceScheme || "light");
   const [initial, setInitial] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -708,9 +1879,24 @@ export default function App() {
     })();
   }, []);
 
+  // Supabase auth session listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) =>
-      setScheme(colorScheme || "dark")
+      setScheme(colorScheme || "light")
     );
     return () => sub.remove();
   }, []);
@@ -720,10 +1906,11 @@ export default function App() {
   if (loading) {
     return (
       <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
+        <StatusBar barStyle="dark-content" />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.gold} />
+          <ActivityIndicator size="large" color={theme.accent} />
           <Text style={{ marginTop: 10, color: theme.muted }}>
-            Starting premium app…
+            Loading Aggie One Access…
           </Text>
         </View>
       </SafeAreaView>
@@ -736,7 +1923,6 @@ export default function App() {
         initialRouteName={initial}
         screenOptions={{ headerShown: false }}
       >
-        {/* Auth screens (NOT inside drawer) */}
         <Stack.Screen name="Login">
           {(props) => <LoginScreen {...props} theme={theme} />}
         </Stack.Screen>
@@ -749,7 +1935,6 @@ export default function App() {
           {(props) => <BuildingRoleScreen {...props} theme={theme} />}
         </Stack.Screen>
 
-        {/* Drawer App (post-login) */}
         <Stack.Screen name="MainApp">
           {() => (
             <Drawer.Navigator
@@ -757,10 +1942,10 @@ export default function App() {
               screenOptions={{
                 headerShown: false,
                 drawerStyle: {
-                  backgroundColor: theme.panel,
-                  width: 240,
+                  backgroundColor: theme.surface,
+                  width: 250,
                 },
-                drawerActiveTintColor: theme.gold,
+                drawerActiveTintColor: theme.accent,
                 drawerInactiveTintColor: theme.muted,
               }}
             >
@@ -768,19 +1953,31 @@ export default function App() {
                 {(props) => <HomeScreen {...props} theme={theme} />}
               </Drawer.Screen>
 
-              <Drawer.Screen name="RequestForm" options={{ title: "New Request" }}>
+              <Drawer.Screen
+                name="RequestForm"
+                options={{ title: "New request" }}
+              >
                 {(props) => <RequestFormScreen {...props} theme={theme} />}
               </Drawer.Screen>
 
-              <Drawer.Screen name="Requests" options={{ title: "Requests History" }}>
+              <Drawer.Screen
+                name="Requests"
+                options={{ title: "Requests" }}
+              >
                 {(props) => <RequestsScreen {...props} theme={theme} />}
               </Drawer.Screen>
 
-              <Drawer.Screen name="AdminPanel" options={{ title: "Admin Panel" }}>
+              <Drawer.Screen
+                name="AdminPanel"
+                options={{ title: "Admin" }}
+              >
                 {(props) => <AdminPanel {...props} theme={theme} />}
               </Drawer.Screen>
 
-              <Drawer.Screen name="Profile" options={{ title: "Profile / Building & Role" }}>
+              <Drawer.Screen
+                name="Profile"
+                options={{ title: "Profile" }}
+              >
                 {(props) => <BuildingRoleScreen {...props} theme={theme} />}
               </Drawer.Screen>
             </Drawer.Navigator>
@@ -792,101 +1989,233 @@ export default function App() {
 }
 
 /* ---------------- STYLES ---------------- */
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  container: { padding: 18, paddingTop: 18, flex: 1 },
-  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
-  logoBox: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 18,
-    elevation: 12,
+  container: { paddingHorizontal: 18, paddingTop: 8, flex: 1 },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  /* Header */
+  headerWrapper: {
+    marginBottom: 12,
   },
-  logoText: { fontWeight: "900", fontSize: 24 },
-  headerTitle: { fontSize: 18, fontWeight: "900" },
-  headerSubtitle: { fontSize: 12, marginTop: 2 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerBackButton: {
+    paddingRight: 8,
+    paddingVertical: 4,
+    marginRight: 4,
+  },
+  headerBackText: {
+    fontSize: 24,
+    fontWeight: "400",
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+
+  /* Cards / Layout */
   card: {
+    borderWidth: 1,
     borderRadius: 14,
     padding: 16,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.24,
-    shadowRadius: 20,
-    elevation: 8,
-    borderWidth: 1,
-  },
-  cardTitle: { fontSize: 16, fontWeight: "900", marginBottom: 6 },
-  hint: { fontSize: 12, marginBottom: 10 },
-  input: {
-    borderWidth: 1,
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-    borderColor: "#1b1b1b",
-  },
-  primaryBtn: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.25,
-    shadowRadius: 18,
-    elevation: 6,
-  },
-  primaryBtnText: { fontWeight: "900" },
-  ghostBtn: { borderWidth: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center" },
-  ghostBtnText: { fontWeight: "800" },
-  row: { flexDirection: "row", justifyContent: "space-between", marginTop: 12, alignItems: "center" },
-  link: { fontWeight: "900", marginLeft: 8 },
-  label: { marginTop: 8, marginBottom: 6 },
-  roleRow: { flexDirection: "row", justifyContent: "space-between" },
-  roleBtn: { flex: 1, marginHorizontal: 4, padding: 10, borderRadius: 8, borderWidth: 1, alignItems: "center" },
-  roleBtnTextSelected: { color: "#fff", fontWeight: "700" },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  fieldLabel: { fontSize: 12, marginTop: 10 },
-  fieldValue: { fontSize: 15, fontWeight: "700" },
-
-  exampleChipPremium: {
-    backgroundColor: "#F7E9BF", // light gold paper for high contrast text
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    marginRight: 10,
-    marginTop: 8,
-    minWidth: 140,
-    maxWidth: 240,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
     elevation: 3,
   },
-
-  onecardPremium: {
-    borderRadius: 14,
-    padding: 18,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.28,
-    shadowRadius: 22,
-    elevation: 12,
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  sectionDescription: {
+    fontSize: 13,
+    marginBottom: 8,
   },
 
-  statusPill: {
+  /* Text / Inputs */
+  fieldGroup: {
+    marginTop: 10,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: "500",
+    marginBottom: 4,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+
+  /* Buttons */
+  primaryBtn: {
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryBtnSmall: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryBtn: {
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  primaryBtnText: {
+    fontWeight: "600",
+    fontSize: 15,
+  },
+
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  link: {
+    fontWeight: "500",
+  },
+
+  /* Profile */
+  profileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  profileCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: NCAT_BLUE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+
+  /* Role buttons */
+  roleRow: {
+    flexDirection: "row",
+    marginTop: 4,
+  },
+  roleBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 8,
+    alignItems: "center",
+    marginRight: 8,
+  },
+
+  /* Tag */
+  tag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginLeft: 6,
+  },
+
+  /* Filter chips */
+  filterChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
+    marginRight: 8,
   },
 
-  kpiTile: {
+  /* Pipeline */
+  pipelineStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    flexWrap: "nowrap",
+  },
+  pipelineStep: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pipelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    borderWidth: 2,
+    marginRight: 4,
+  },
+  pipelineLabel: {
+    fontSize: 11,
+    maxWidth: 80,
+  },
+  pipelineConnector: {
+    borderBottomWidth: 1,
+    marginHorizontal: 6,
+    width: 20,
+    opacity: 0.6,
+  },
+
+  /* Example chip */
+  exampleChip: {
+    backgroundColor: "#EFF3FF",
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+
+  /* KPI */
+  kpiRow: {
+    flexDirection: "row",
+    marginTop: 10,
+    justifyContent: "space-between",
+  },
+  kpiCard: {
     flex: 1,
-    marginRight: 8,
-    padding: 12,
+    backgroundColor: "#F9FAFB",
     borderRadius: 10,
-    backgroundColor: "#070708",
-    alignItems: "flex-start",
+    padding: 10,
+    marginRight: 8,
+  },
+  kpiValue: {
+    fontSize: 18,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+
+  /* Progress */
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#E5E7EB",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: 8,
+    borderRadius: 999,
+  },
+
+  /* Banner */
+  banner: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
