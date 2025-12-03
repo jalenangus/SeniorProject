@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import "react-native-gesture-handler";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   SafeAreaView,
   View,
@@ -6,219 +7,171 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
-  ScrollView,
-  Animated,
-  Platform,
-  KeyboardAvoidingView,
-  Appearance,
-  useColorScheme,
   FlatList,
-  Easing,
-  StatusBar,
+  ScrollView,
+  Alert,
+  Switch,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createDrawerNavigator } from "@react-navigation/drawer";
 
-// --- Navigation ---
-const Drawer = createDrawerNavigator();
-const Stack = createNativeStackNavigator();
-
-// --- Supabase Backend ---
 import { supabase } from "./supabase/client";
 import { signInUser, signUpUser, signOutUser } from "./supabase/auth";
 
-/* ---------------- THEME (Modern Light) ---------------- */
+const Stack = createNativeStackNavigator();
 
-const NCAT_BLUE = "#003399";
-const NCAT_BLUE_SOFT = "#2453C4";
+/* ------------------------------------------------------------------------- */
+/*                            THEME / BASE CONSTANTS                          */
+/* ------------------------------------------------------------------------- */
 
-function buildTheme(scheme) {
-  // force light style but respect system if you want later
-  const light = true;
-  return {
-    bg: "#F5F5F7", // base background like iOS settings
-    surface: "#FFFFFF",
-    surfaceAlt: "#F9F9FB",
-    accent: NCAT_BLUE,
-    accentSoft: NCAT_BLUE_SOFT,
-    text: "#111827",
-    muted: "#6B7280",
-    border: "#E5E7EB",
-    danger: "#DC2626",
-    success: "#16A34A",
-    pending: "#D97706",
-    shadow: "#000000",
-  };
+const COLORS = {
+  background: "#F5F5F7",
+  card: "#FFFFFF",
+  text: "#111827",
+  muted: "#6B7280",
+  border: "#E5E7EB",
+  primary: "#007AFF", // iOS blue
+  danger: "#DC2626",
+  success: "#16A34A",
+  warning: "#D97706",
+  info: "#2563EB",
+  chipBg: "#EFF1F5",
+};
+
+const SIZES = {
+  radiusLg: 16,
+  radiusMd: 12,
+  radiusSm: 8,
+  padding: 16,
+  gap: 10,
+};
+
+/* ------------------------------------------------------------------------- */
+/*                               HELPER FUNCTIONS                            */
+/* ------------------------------------------------------------------------- */
+
+async function saveUserLocal(user) {
+  await AsyncStorage.setItem("user", JSON.stringify(user));
 }
 
-/* ---------------- HELPERS ---------------- */
-
-function useFadeIn(duration = 300) {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return anim;
+async function loadUserLocal() {
+  const json = await AsyncStorage.getItem("user");
+  return json ? JSON.parse(json) : null;
 }
 
-function PressableScale({ onPress, children, style, disabled }) {
-  const scale = useRef(new Animated.Value(1)).current;
+async function clearUserLocal() {
+  await AsyncStorage.removeItem("user");
+}
+
+async function loadRequestsLocal() {
+  const json = await AsyncStorage.getItem("requests");
+  return json ? JSON.parse(json) : [];
+}
+
+async function saveRequestsLocal(list) {
+  await AsyncStorage.setItem("requests", JSON.stringify(list));
+}
+
+/* ------------------------------------------------------------------------- */
+/*                          REUSABLE SMALL COMPONENTS                        */
+/* ------------------------------------------------------------------------- */
+
+function AppScreen({ children }) {
+  // Wrapper for consistent background & SafeArea
+  return (
+    <SafeAreaView style={styles.screen}>
+      {children}
+    </SafeAreaView>
+  );
+}
+
+function SectionCard({ title, subtitle, children, style }) {
+  return (
+    <View style={[styles.card, style]}>
+      {title ? <Text style={styles.sectionTitle}>{title}</Text> : null}
+      {subtitle ? (
+        <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+function PrimaryButton({ label, onPress, loading, style }) {
   return (
     <TouchableOpacity
-      activeOpacity={0.85}
-      disabled={disabled}
-      onPressIn={() =>
-        Animated.spring(scale, {
-          toValue: 0.97,
-          useNativeDriver: true,
-        }).start()
-      }
-      onPressOut={() =>
-        Animated.spring(scale, {
-          toValue: 1,
-          useNativeDriver: true,
-        }).start()
-      }
       onPress={onPress}
+      style={[styles.primaryBtn, style]}
+      disabled={loading}
     >
-      <Animated.View style={[{ transform: [{ scale }] }, style]}>
-        {children}
-      </Animated.View>
+      {loading ? (
+        <ActivityIndicator color="#FFFFFF" />
+      ) : (
+        <Text style={styles.primaryBtnText}>{label}</Text>
+      )}
     </TouchableOpacity>
   );
 }
 
-/* ---------------- SMALL UI COMPONENTS ---------------- */
-
-function Tag({ label, tone = "default", theme }) {
-  let bg = theme.surfaceAlt;
-  let color = theme.muted;
-  if (tone === "success") {
-    bg = "rgba(22,163,74,0.1)";
-    color = theme.success;
-  } else if (tone === "danger") {
-    bg = "rgba(220,38,38,0.1)";
-    color = theme.danger;
-  } else if (tone === "pending") {
-    bg = "rgba(217,119,6,0.1)";
-    color = theme.pending;
-  } else if (tone === "info") {
-    bg = "rgba(37,99,235,0.08)";
-    color = theme.accent;
-  }
+function SecondaryButton({ label, onPress, style, danger }) {
   return (
-    <View style={[styles.tag, { backgroundColor: bg }]}>
-      <Text style={{ color, fontSize: 11, fontWeight: "600" }}>{label}</Text>
+    <TouchableOpacity onPress={onPress} style={[styles.secondaryBtn, style]}>
+      <Text
+        style={[
+          styles.secondaryBtnText,
+          danger && { color: COLORS.danger, fontWeight: "600" },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function Tag({ label, tone = "default" }) {
+  let color = COLORS.muted;
+  if (tone === "success") color = COLORS.success;
+  if (tone === "danger") color = COLORS.danger;
+  if (tone === "warning") color = COLORS.warning;
+  if (tone === "info") color = COLORS.info;
+
+  return (
+    <View style={styles.tag}>
+      <Text style={{ fontSize: 11, fontWeight: "600", color }}>{label}</Text>
     </View>
   );
 }
 
-function PipelineStrip({ theme }) {
-  const steps = [
-    "Submit Request",
-    "Validate",
-    "Chair Review",
-    "Aggie One",
-    "Complete",
-  ];
+function LabeledRow({ label, value, muted }) {
   return (
-    <View style={styles.pipelineStrip}>
-      {steps.map((step, index) => (
-        <View key={step} style={styles.pipelineStep}>
-          <View
-            style={[
-              styles.pipelineDot,
-              {
-                borderColor: theme.accent,
-                backgroundColor: index === 0 ? theme.accent : "#FFFFFF",
-              },
-            ]}
-          />
-          <Text
-            style={[styles.pipelineLabel, { color: theme.muted }]}
-            numberOfLines={1}
-          >
-            {step}
-          </Text>
-          {index < steps.length - 1 && (
-            <View
-              style={[
-                styles.pipelineConnector,
-                { borderColor: theme.border },
-              ]}
-            />
-          )}
-        </View>
-      ))}
+    <View style={styles.labeledRow}>
+      <Text style={styles.labeledRowLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.labeledRowValue,
+          muted && { color: COLORS.muted, fontWeight: "400" },
+        ]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
 
-/* ---------------- Header (with optional back button) ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                               LOGIN SCREEN                                */
+/* ------------------------------------------------------------------------- */
 
-function AppHeader({
-  title,
-  subtitle,
-  theme,
-  right,
-  showBack,
-  navigation,
-}) {
-  return (
-    <View style={styles.headerWrapper}>
-      <View style={styles.headerRow}>
-        {showBack && navigation ? (
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.headerBackButton}
-          >
-            <Text style={[styles.headerBackText, { color: theme.accent }]}>
-              ‹
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-
-        <View style={{ flex: 1 }}>
-          <Text
-            style={[
-              styles.headerTitle,
-              { color: theme.text, marginLeft: showBack ? 0 : 2 },
-            ]}
-          >
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text style={[styles.headerSubtitle, { color: theme.muted }]}>
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
-
-        {right ? <View style={{ marginLeft: 12 }}>{right}</View> : null}
-      </View>
-    </View>
-  );
-}
-
-/* ---------------- LOGIN ---------------- */
-
-function LoginScreen({ navigation, theme }) {
-  const fade = useFadeIn(320);
+function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const tryLogin = async () => {
+  const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Missing information", "Enter both email and password.");
+      Alert.alert("Missing info", "Please enter both email and password.");
       return;
     }
 
@@ -231,1959 +184,1350 @@ function LoginScreen({ navigation, theme }) {
       return;
     }
 
-    try {
-      const user = {
-        id: data.user?.id ?? Date.now().toString(),
-        email: data.user?.email ?? email.trim(),
-        name: data.user?.user_metadata?.full_name || email.split("@")[0],
-        role: "professor",
-        approved: true,
-      };
+    const supaUser = data.user;
+    const userObj = {
+      id: supaUser?.id ?? Date.now().toString(),
+      email: supaUser?.email ?? email.trim(),
+      name: supaUser?.user_metadata?.full_name || email.split("@")[0],
+      department: "Electrical & Computer Engineering",
+      role: "Faculty",
+    };
 
-      await AsyncStorage.setItem("user", JSON.stringify(user));
-    } catch (e) {
-      console.log("Error storing user locally", e);
-    }
+    await saveUserLocal(userObj);
 
     setLoading(false);
-    Alert.alert("Success", "Welcome to Aggie One Access.");
-    navigation.replace("MainApp");
+    navigation.replace("Home");
   };
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle="dark-content" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1 }}
-      >
-        <Animated.View style={[styles.container, { opacity: fade }]}>
-          <AppHeader
-            title="Aggie One Access"
-            subtitle="Sign in with your NCAT credentials"
-            theme={theme}
-            showBack={false}
-            navigation={navigation}
+    <AppScreen>
+      <View style={styles.container}>
+        <Text style={styles.appTitle}>Aggie One Access</Text>
+        <Text style={styles.appSubtitle}>
+          Sign in with your NCAT credentials
+        </Text>
+
+        <SectionCard
+          title="Sign In"
+          subtitle="Access building requests, approvals, and status."
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@ncat.edu"
+              placeholderTextColor={COLORS.muted}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="••••••••"
+              placeholderTextColor={COLORS.muted}
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Sign In"
+            onPress={handleLogin}
+            loading={loading}
+            style={{ marginTop: 8 }}
           />
 
-          <ScrollView
-            contentContainerStyle={{ paddingBottom: 32 }}
-            keyboardShouldPersistTaps="handled"
+          <TouchableOpacity
+            onPress={() => navigation.navigate("Signup")}
+            style={{ marginTop: 16, alignItems: "center" }}
           >
-            <View
-              style={[
-                styles.card,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                  shadowColor: theme.shadow,
-                },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Sign in
-              </Text>
-              <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-                Access building requests, approvals, and status tracking in one
-                place.
-              </Text>
+            <Text style={styles.linkText}>
+              Don&apos;t have an account?{" "}
+              <Text style={{ color: COLORS.primary }}>Sign up</Text>
+            </Text>
+          </TouchableOpacity>
+        </SectionCard>
 
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                  NCAT Email
-                </Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      borderColor: theme.border,
-                      backgroundColor: "#FFFFFF",
-                      color: theme.text,
-                    },
-                  ]}
-                  placeholder="you@ncat.edu"
-                  placeholderTextColor={theme.muted}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={email}
-                  onChangeText={setEmail}
-                />
-              </View>
-
-              <View style={styles.fieldGroup}>
-                <View style={styles.row}>
-                  <Text
-                    style={[styles.fieldLabel, { color: theme.muted }]}
-                  >
-                    Password
-                  </Text>
-                  <Text style={{ color: theme.muted, fontSize: 11 }}>
-                    At least 8 characters
-                  </Text>
-                </View>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      borderColor: theme.border,
-                      backgroundColor: "#FFFFFF",
-                      color: theme.text,
-                    },
-                  ]}
-                  placeholder="••••••••"
-                  placeholderTextColor={theme.muted}
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
-              </View>
-
-              <PressableScale
-                onPress={tryLogin}
-                disabled={loading}
-                style={{ marginTop: 8 }}
-              >
-                <View
-                  style={[
-                    styles.primaryBtn,
-                    {
-                      backgroundColor: loading ? "#9CA3AF" : theme.accent,
-                      shadowColor: theme.shadow,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.primaryBtnText,
-                      { color: "#FFFFFF" },
-                    ]}
-                  >
-                    {loading ? "Signing in…" : "Sign in"}
-                  </Text>
-                </View>
-              </PressableScale>
-
-              <View
-                style={[
-                  styles.row,
-                  { marginTop: 16, justifyContent: "flex-start" },
-                ]}
-              >
-                <Text style={{ color: theme.muted, fontSize: 13 }}>
-                  Don&apos;t have an account?
-                </Text>
-                <TouchableOpacity
-                  onPress={() => navigation.navigate("Signup")}
-                >
-                  <Text
-                    style={[
-                      styles.link,
-                      { color: theme.accent, fontSize: 13 },
-                    ]}
-                  >
-                    {" "}
-                    Create one
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={{ marginTop: 20 }}>
-              <PipelineStrip theme={theme} />
-            </View>
-          </ScrollView>
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        <SectionCard
+          title="Demo accounts (for presentation)"
+          subtitle="These descriptions help you explain flows in your presentation."
+          style={{ marginTop: 14 }}
+        >
+          <Text style={styles.smallText}>
+            • Faculty account: Creates and tracks building access requests.
+          </Text>
+          <Text style={styles.smallText}>
+            • Admin account: Demonstrates approval workflow and status changes.
+          </Text>
+          <Text style={styles.smallText}>
+            • For your demo, you can describe both roles even if you use one
+            login.
+          </Text>
+        </SectionCard>
+      </View>
+    </AppScreen>
   );
 }
 
-/* ---------------- SIGNUP ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                               SIGNUP SCREEN                               */
+/* ------------------------------------------------------------------------- */
 
-function SignupScreen({ navigation, theme }) {
-  const fade = useFadeIn(320);
+function SignupScreen({ navigation }) {
   const [name, setName] = useState("");
+  const [department, setDepartment] = useState("Electrical & Computer Engineering");
+  const [role, setRole] = useState("Faculty");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const doSignup = async () => {
     if (!name || !email || !password) {
-      return Alert.alert(
-        "Missing information",
-        "Please enter your name, NCAT email, and password."
-      );
+      Alert.alert("Missing info", "Please fill in all fields.");
+      return;
     }
 
+    const isNcat = (e) => !!e && e.toLowerCase().endsWith("@ncat.edu");
     if (!isNcat(email)) {
-      return Alert.alert(
-        "Invalid email",
-        "Aggie One Access only accepts @ncat.edu addresses."
-      );
+      Alert.alert("Email restriction", "Please use an @ncat.edu email.");
+      return;
     }
 
-    if (password.length < 8) {
-      return Alert.alert(
-        "Weak password",
-        "Password must be at least 8 characters."
-      );
-    }
-
-    setSubmitting(true);
+    setLoading(true);
     const { data, error } = await signUpUser(email.trim(), password);
 
     if (error) {
-      setSubmitting(false);
+      setLoading(false);
       Alert.alert("Signup failed", error.message);
       return;
     }
 
-    try {
-      const newUser = {
-        id: data.user?.id ?? Date.now().toString(),
-        name,
-        email: email.trim(),
-        role: "professor",
-        building: null,
-        approved: false,
-      };
-      const usersJson = await AsyncStorage.getItem("users");
-      const users = usersJson ? JSON.parse(usersJson) : [];
-      users.push(newUser);
-      await AsyncStorage.setItem("users", JSON.stringify(users));
-    } catch (e) {
-      console.log("local signup store error", e);
-    }
+    const supaUser = data.user;
+    const userObj = {
+      id: supaUser?.id ?? Date.now().toString(),
+      email: supaUser?.email ?? email.trim(),
+      name,
+      department,
+      role,
+    };
 
-    setSubmitting(false);
-    Alert.alert(
-      "Account created",
-      "Your Aggie One Access account has been created. Please verify your email if required, then sign in.",
-      [{ text: "Go to Login", onPress: () => navigation.replace("Login") }]
-    );
+    await saveUserLocal(userObj);
+    setLoading(false);
+    Alert.alert("Success", "Account created. You are now signed in.");
+    navigation.replace("Home");
   };
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle="dark-content" />
-      <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader
-          title="Create account"
-          subtitle="Set up your Aggie One Access profile"
-          theme={theme}
-          showBack={true}
-          navigation={navigation}
-        />
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-              },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Basic information
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              This information is used to connect you with building access
-              requests and approvals.
-            </Text>
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.appTitle}>Create Account</Text>
+        <Text style={styles.appSubtitle}>
+          Aggie One Access – NCAT faculty & staff
+        </Text>
 
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Full name
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="First Last"
-                placeholderTextColor={theme.muted}
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <View style={styles.row}>
-                <Text
-                  style={[styles.fieldLabel, { color: theme.muted }]}
-                >
-                  NCAT email
-                </Text>
-                <Tag
-                  label="@ncat.edu only"
-                  tone="info"
-                  theme={theme}
-                />
-              </View>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="you@ncat.edu"
-                placeholderTextColor={theme.muted}
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Password
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="At least 8 characters"
-                placeholderTextColor={theme.muted}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-            </View>
-
-            <PressableScale
-              onPress={doSignup}
-              disabled={submitting}
-              style={{ marginTop: 16 }}
-            >
-              <View
-                style={[
-                  styles.primaryBtn,
-                  {
-                    backgroundColor: submitting ? "#9CA3AF" : theme.accent,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    { color: "#FFFFFF" },
-                  ]}
-                >
-                  {submitting ? "Creating account…" : "Create account"}
-                </Text>
-              </View>
-            </PressableScale>
+        <SectionCard
+          title="Sign Up"
+          subtitle="Use your official @ncat.edu email to create an account."
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Full Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="First Last"
+              placeholderTextColor={COLORS.muted}
+              value={name}
+              onChangeText={setName}
+            />
           </View>
-        </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Department</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Electrical & Computer Engineering"
+              placeholderTextColor={COLORS.muted}
+              value={department}
+              onChangeText={setDepartment}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Role</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Faculty, Staff, Admin"
+              placeholderTextColor={COLORS.muted}
+              value={role}
+              onChangeText={setRole}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>NCAT Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@ncat.edu"
+              placeholderTextColor={COLORS.muted}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="At least 8 characters"
+              placeholderTextColor={COLORS.muted}
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Create Account"
+            onPress={doSignup}
+            loading={loading}
+            style={{ marginTop: 8 }}
+          />
+
+          <TouchableOpacity
+            onPress={() => navigation.replace("Login")}
+            style={{ marginTop: 16, alignItems: "center" }}
+          >
+            <Text style={styles.linkText}>
+              Already have an account?{" "}
+              <Text style={{ color: COLORS.primary }}>Sign in</Text>
+            </Text>
+          </TouchableOpacity>
+        </SectionCard>
+
+        <SectionCard
+          title="Why @ncat.edu only?"
+          subtitle="You can explain this in your presentation."
+          style={{ marginTop: 14 }}
+        >
+          <Text style={styles.smallText}>
+            • Ensures only NCAT-affiliated users submit access requests.
+          </Text>
+          <Text style={styles.smallText}>
+            • Matches how real building systems trust campus emails.
+          </Text>
+        </SectionCard>
+      </ScrollView>
+    </AppScreen>
   );
 }
 
-/* ---------------- PROFILE / BUILDING ROLE ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                              HOME DASHBOARD                               */
+/* ------------------------------------------------------------------------- */
 
-function BuildingRoleScreen({ navigation, theme }) {
-  const fade = useFadeIn(320);
-  const [building, setBuilding] = useState("");
-  const [role, setRole] = useState("professor");
-  const [currentUser, setCurrentUser] = useState(null);
+function HomeScreen({ navigation }) {
+  const [user, setUser] = useState(null);
+  const [stats, setStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+  });
+
+  const loadUserAndRequests = async () => {
+    const u = await loadUserLocal();
+    setUser(u);
+
+    const list = await loadRequestsLocal();
+    const total = list.length;
+    const pending = list.filter(
+      (r) => r.status === "Pending" || r.status === "Under Review"
+    ).length;
+    const approved = list.filter((r) => r.status === "Approved").length;
+    const rejected = list.filter((r) => r.status === "Rejected").length;
+
+    setStats({ total, pending, approved, rejected });
+  };
+
+  useEffect(() => {
+    const unsub = navigation.addListener("focus", loadUserAndRequests);
+    loadUserAndRequests();
+    return unsub;
+  }, [navigation]);
+
+  const logout = async () => {
+    await signOutUser().catch(() => {});
+    await clearUserLocal();
+    navigation.replace("Login");
+  };
+
+  return (
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+      >
+        <Text style={styles.appTitle}>Aggie One Access</Text>
+        <Text style={styles.appSubtitle}>
+          Welcome{user ? `, ${user.name}` : ""}.
+        </Text>
+
+        {/* Profile summary */}
+        <SectionCard
+          title="Profile Summary"
+          subtitle="Basic information attached to your access requests."
+        >
+          <LabeledRow
+            label="Name"
+            value={user?.name || "Not set"}
+          />
+          <LabeledRow
+            label="Email"
+            value={user?.email || "Not set"}
+            muted
+          />
+          <LabeledRow
+            label="Department"
+            value={user?.department || "Not set"}
+          />
+          <LabeledRow
+            label="Role"
+            value={user?.role || "Not set"}
+          />
+
+          <SecondaryButton
+            label="Edit Profile"
+            onPress={() => navigation.navigate("Profile")}
+            style={{ marginTop: 12 }}
+          />
+        </SectionCard>
+
+        {/* Requests overview */}
+        <SectionCard
+          title="Requests Overview"
+          subtitle="Snapshot of your current building access activity."
+          style={{ marginTop: 14 }}
+        >
+          <View style={styles.row}>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Total</Text>
+              <Text style={styles.kpiValue}>{stats.total}</Text>
+            </View>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Pending</Text>
+              <Text
+                style={[
+                  styles.kpiValue,
+                  { color: COLORS.warning },
+                ]}
+              >
+                {stats.pending}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Approved</Text>
+              <Text
+                style={[
+                  styles.kpiValue,
+                  { color: COLORS.success },
+                ]}
+              >
+                {stats.approved}
+              </Text>
+            </View>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Rejected</Text>
+              <Text
+                style={[
+                  styles.kpiValue,
+                  { color: COLORS.danger },
+                ]}
+              >
+                {stats.rejected}
+              </Text>
+            </View>
+          </View>
+
+          <View style={{ marginTop: 8 }}>
+            <Text style={styles.smallText}>
+              Tip for your presentation: Use these numbers to show how your app
+              scales with multiple requests and how quickly you can see changes
+              after admin approval.
+            </Text>
+          </View>
+        </SectionCard>
+
+        {/* Actions */}
+        <SectionCard
+          title="Quick Actions"
+          subtitle="Most common actions are collected here."
+          style={{ marginTop: 14 }}
+        >
+          <PrimaryButton
+            label="New Request"
+            onPress={() => navigation.navigate("RequestForm")}
+          />
+          <SecondaryButton
+            label="View Requests"
+            onPress={() => navigation.navigate("Requests")}
+            style={{ marginTop: 10 }}
+          />
+          <SecondaryButton
+            label="Admin View"
+            onPress={() => navigation.navigate("Admin")}
+            style={{ marginTop: 10 }}
+          />
+          <SecondaryButton
+            label="Help & FAQ"
+            onPress={() => navigation.navigate("Help")}
+            style={{ marginTop: 10 }}
+          />
+          <SecondaryButton
+            label="Settings"
+            onPress={() => navigation.navigate("Settings")}
+            style={{ marginTop: 10 }}
+          />
+          <SecondaryButton
+            label="Sign Out"
+            onPress={logout}
+            style={{ marginTop: 10 }}
+            danger
+          />
+        </SectionCard>   
+      </ScrollView>
+    </AppScreen>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/*                            PROFILE SETTINGS SCREEN                        */
+/* ------------------------------------------------------------------------- */
+
+function ProfileScreen({ navigation }) {
+  const [user, setUser] = useState(null);
+  const [department, setDepartment] = useState("");
+  const [role, setRole] = useState("");
+  const [office, setOffice] = useState("");
+  const [hours, setHours] = useState("");
 
   useEffect(() => {
     (async () => {
-      const uJson = await AsyncStorage.getItem("user");
-      if (uJson) {
-        const u = JSON.parse(uJson);
-        setCurrentUser(u);
-        if (u.building) setBuilding(u.building);
-        if (u.role) setRole(u.role);
-      }
+      const u = await loadUserLocal();
+      setUser(u);
+      setDepartment(u?.department || "");
+      setRole(u?.role || "");
+      setOffice(u?.office || "");
+      setHours(u?.hours || "");
     })();
   }, []);
 
   const saveProfile = async () => {
-    if (!building.trim()) {
-      return Alert.alert(
-        "Missing building",
-        "Please enter your primary building."
-      );
-    }
-    const uJson = await AsyncStorage.getItem("user");
-    const u = uJson ? JSON.parse(uJson) : null;
-    if (!u) return Alert.alert("Error", "No user found.");
-
-    const updated = { ...u, building: building.trim(), role };
-    await AsyncStorage.setItem("user", JSON.stringify(updated));
-
-    const usersJson = await AsyncStorage.getItem("users");
-    let users = usersJson ? JSON.parse(usersJson) : [];
-    users = users.map((us) => (us.id === updated.id ? updated : us));
-    await AsyncStorage.setItem("users", JSON.stringify(users));
-
-    Alert.alert("Profile saved", "Your profile has been updated.");
+    if (!user) return;
+    const updated = {
+      ...user,
+      department,
+      role,
+      office,
+      hours,
+    };
+    await saveUserLocal(updated);
+    Alert.alert("Saved", "Profile information updated.");
     navigation.goBack();
   };
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader
-          title="Profile"
-          subtitle="Role and primary building"
-          theme={theme}
-          showBack={true}
-          navigation={navigation}
-        />
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-          <View
-            style={[
-              styles.card,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Account
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Details used to connect your requests to the appropriate building
-              and approver.
-            </Text>
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.appTitle}>Profile</Text>
+        <Text style={styles.appSubtitle}>
+          Update role and contact information associated with requests.
+        </Text>
 
-            {currentUser && (
-              <View style={{ marginTop: 8, marginBottom: 16 }}>
-                <Text
-                  style={{ color: theme.muted, fontSize: 12, marginBottom: 2 }}
-                >
-                  Signed in as
-                </Text>
-                <Text
-                  style={{
-                    color: theme.text,
-                    fontWeight: "600",
-                    marginBottom: 2,
-                  }}
-                >
-                  {currentUser.name}
-                </Text>
-                <Text style={{ color: theme.muted }}>
-                  {currentUser.email}
-                </Text>
-              </View>
-            )}
+        <SectionCard title="Basic Info">
+          <LabeledRow
+            label="Name"
+            value={user?.name || "Not set"}
+          />
+          <LabeledRow
+            label="Email"
+            value={user?.email || "Not set"}
+            muted
+          />
+        </SectionCard>
 
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Primary building
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="e.g., McNair Hall"
-                placeholderTextColor={theme.muted}
-                value={building}
-                onChangeText={setBuilding}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Role
-              </Text>
-              <View style={styles.roleRow}>
-                {["professor", "researcher", "admin"].map((r) => {
-                  const active = role === r;
-                  return (
-                    <TouchableOpacity
-                      key={r}
-                      onPress={() => setRole(r)}
-                      style={[
-                        styles.roleBtn,
-                        {
-                          borderColor: active ? theme.accent : theme.border,
-                          backgroundColor: active
-                            ? "rgba(0,51,153,0.08)"
-                            : "#FFFFFF",
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          color: active ? theme.accent : theme.text,
-                          fontWeight: active ? "700" : "500",
-                        }}
-                      >
-                        {r.charAt(0).toUpperCase() + r.slice(1)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            <PressableScale onPress={saveProfile} style={{ marginTop: 16 }}>
-              <View
-                style={[
-                  styles.primaryBtn,
-                  { backgroundColor: theme.accent },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    { color: "#FFFFFF" },
-                  ]}
-                >
-                  Save profile
-                </Text>
-              </View>
-            </PressableScale>
+        <SectionCard title="Academic Info" style={{ marginTop: 14 }}>
+          <View style={styles.field}>
+            <Text style={styles.label}>Department</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Electrical & Computer Engineering"
+              placeholderTextColor={COLORS.muted}
+              value={department}
+              onChangeText={setDepartment}
+            />
           </View>
-        </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Role</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Faculty, Staff, Admin"
+              placeholderTextColor={COLORS.muted}
+              value={role}
+              onChangeText={setRole}
+            />
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          title="Office & Availability"
+          style={{ marginTop: 14, marginBottom: 20 }}
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Office Location</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., McNair 220"
+              placeholderTextColor={COLORS.muted}
+              value={office}
+              onChangeText={setOffice}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Office Hours</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Mon/Wed 2–4 PM"
+              placeholderTextColor={COLORS.muted}
+              value={hours}
+              onChangeText={setHours}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Save Profile"
+            onPress={saveProfile}
+            style={{ marginTop: 12 }}
+          />
+        </SectionCard>
+      </ScrollView>
+    </AppScreen>
   );
 }
 
-/* ---------------- REQUEST FORM ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                             REQUEST FORM SCREEN                           */
+/* ------------------------------------------------------------------------- */
 
-function RequestFormScreen({ navigation, theme }) {
-  const fade = useFadeIn(320);
+function RequestFormScreen({ navigation }) {
   const [title, setTitle] = useState("");
-  const [details, setDetails] = useState("");
   const [building, setBuilding] = useState("");
   const [room, setRoom] = useState("");
-  const [timeWindow, setTimeWindow] = useState("");
-  const [semester, setSemester] = useState("");
+  const [details, setDetails] = useState("");
+  const [category, setCategory] = useState("Lab Access");
+  const [priority, setPriority] = useState("Normal");
   const [submitting, setSubmitting] = useState(false);
 
-  const examples = [
-    {
-      title: "Extended lab access",
-      details:
-        "Request extended key card access for senior design students after 6PM.",
-      building: "McNair Hall",
-      room: "Lab 220",
-    },
-    {
-      title: "Evening study space",
-      details:
-        "Reserve quiet study space during finals week for ECE majors.",
-      building: "Bluford Library",
-      room: "3rd Floor Quiet Zone",
-    },
-    {
-      title: "Counseling appointment block",
-      details:
-        "Reserve recurring appointment times for student counseling sessions.",
-      building: "Murphy Hall",
-      room: "Suite 120",
-    },
-  ];
+  const submitRequest = async () => {
+    if (!title || !building || !details) {
+      Alert.alert(
+        "Missing info",
+        "Please provide a title, building, and description."
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    const user = await loadUserLocal();
+
+    const request = {
+      id: Date.now().toString(),
+      title,
+      building,
+      room,
+      details,
+      category,
+      priority,
+      status: "Pending",
+      createdAt: new Date().toISOString(),
+      createdBy: user ? user.email : "unknown@ncat.edu",
+      createdByName: user ? user.name : "Unknown",
+    };
+
+    const list = await loadRequestsLocal();
+    list.unshift(request);
+    await saveRequestsLocal(list);
+
+    setSubmitting(false);
+    Alert.alert("Submitted", "Your request has been submitted.");
+    navigation.goBack();
+  };
 
   const applyExample = (example) => {
     setTitle(example.title);
+    setBuilding(example.building);
+    setRoom(example.room);
     setDetails(example.details);
-    setBuilding(example.building || "");
-    setRoom(example.room || "");
+    setCategory(example.category);
+    setPriority(example.priority);
   };
 
-  const submit = async () => {
-    if (!title.trim() || !details.trim() || !building.trim() || !semester.trim()) {
-      return Alert.alert(
-        "Incomplete request",
-        "Please enter a title, building, description, and semester."
-      );
-    }
-    setSubmitting(true);
-    try {
-      const uJson = await AsyncStorage.getItem("user");
-      const user =
-        uJson != null
-          ? JSON.parse(uJson)
-          : { name: "Unknown", email: "unknown@ncat.edu" };
-
-      const request = {
-        id: Date.now().toString(),
-        title: title.trim(),
-        details: details.trim(),
-        building: building.trim(),
-        room: room.trim(),
-        timeWindow: timeWindow.trim(),
-        semester: semester.trim(),
-        name: user.name,
-        email: user.email,
-        status: "Pending",
-        timestamp: new Date().toISOString(),
-        priority: "Normal",
-      };
-
-      const reqsJson = await AsyncStorage.getItem("requests");
-      const existing = reqsJson ? JSON.parse(reqsJson) : [];
-      existing.unshift(request);
-      await AsyncStorage.setItem("requests", JSON.stringify(existing));
-
-      // Simulated pipeline: under review, then approved/rejected
-      setTimeout(async () => {
-        const r1 = (await AsyncStorage.getItem("requests")) || "[]";
-        const arr1 = JSON.parse(r1);
-        const updated1 = arr1.map((r) =>
-          r.id === request.id ? { ...r, status: "Under review" } : r
-        );
-        await AsyncStorage.setItem("requests", JSON.stringify(updated1));
-
-        setTimeout(async () => {
-          const approve = Math.random() < 0.8;
-          const finalStatus = approve ? "Approved" : "Rejected";
-          const r2 = (await AsyncStorage.getItem("requests")) || "[]";
-          const arr2 = JSON.parse(r2);
-          const updated2 = arr2.map((r) =>
-            r.id === request.id ? { ...r, status: finalStatus } : r
-          );
-          await AsyncStorage.setItem("requests", JSON.stringify(updated2));
-          setSubmitting(false);
-
-          Alert.alert(
-            "Request submitted",
-            "Your request has entered the review process.",
-            [
-              {
-                text: "View requests",
-                onPress: () => navigation.navigate("Requests"),
-              },
-              {
-                text: "Back to home",
-                style: "cancel",
-                onPress: () => navigation.navigate("Home"),
-              },
-            ]
-          );
-        }, 2000);
-      }, 1000);
-
-      setTitle("");
-      setDetails("");
-      setBuilding("");
-      setRoom("");
-      setTimeWindow("");
-      setSemester("");
-    } catch (e) {
-      console.log("submit error", e);
-      setSubmitting(false);
-      Alert.alert("Error", "Could not submit request. Please try again.");
-    }
-  };
+  const examples = [
+    {
+      title: "Extended Senior Design Lab Access",
+      building: "McNair Hall",
+      room: "Lab 220",
+      details:
+        "Request extended badge access for senior design teams after 6PM on weekdays for the next 8 weeks.",
+      category: "Lab Access",
+      priority: "High",
+    },
+    {
+      title: "Weekend Study Space",
+      building: "Bluford Library",
+      room: "3rd Floor Quiet Zone",
+      details:
+        "Reserve dedicated study area for ECE majors during midterms on Saturday and Sunday evenings.",
+      category: "Study Space",
+      priority: "Normal",
+    },
+    {
+      title: "Counseling Appointment Block",
+      building: "Murphy Hall",
+      room: "Suite 120",
+      details:
+        "Set up recurring 30-minute appointment blocks for student counseling sessions on Tuesdays.",
+      category: "Student Services",
+      priority: "Low",
+    },
+  ];
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader
-          title="New request"
-          subtitle="Submit a building access request"
-          theme={theme}
-          showBack={true}
-          navigation={navigation}
-        />
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-          <View
-            style={[
-              styles.card,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Request details
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              These fields feed into the access file for Aggie One and building
-              approvers.
-            </Text>
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.appTitle}>New Request</Text>
+        <Text style={styles.appSubtitle}>
+          Submit a building, lab, or space access request.
+        </Text>
 
-            <Text style={[styles.fieldLabel, { color: theme.muted, marginTop: 8 }]}>
-              Example templates
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginTop: 4 }}
+        <SectionCard
+          title="Templates"
+          subtitle="Tap a template to quickly fill the form."
+        >
+          {examples.map((ex) => (
+            <TouchableOpacity
+              key={ex.title}
+              style={styles.templateChip}
+              onPress={() => applyExample(ex)}
             >
-              {examples.map((ex) => (
-                <PressableScale
-                  key={ex.title}
-                  onPress={() => applyExample(ex)}
-                  style={{ marginRight: 8 }}
-                >
-                  <View style={styles.exampleChip}>
-                    <Text
-                      numberOfLines={2}
-                      style={{
-                        color: theme.accent,
-                        fontWeight: "600",
-                        fontSize: 12,
-                        maxWidth: 200,
-                      }}
-                    >
-                      {ex.title}
-                    </Text>
-                  </View>
-                </PressableScale>
-              ))}
-            </ScrollView>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Title
+              <Text style={styles.templateTitle}>{ex.title}</Text>
+              <Text style={styles.templateSubtitle}>
+                {ex.building} • {ex.category}
               </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="Short label for this request"
-                placeholderTextColor={theme.muted}
-                value={title}
-                onChangeText={setTitle}
-              />
-            </View>
+            </TouchableOpacity>
+          ))}
+        </SectionCard>
 
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Building
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="e.g., McNair Hall"
-                placeholderTextColor={theme.muted}
-                value={building}
-                onChangeText={setBuilding}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Room (optional)
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="e.g., Lab 220"
-                placeholderTextColor={theme.muted}
-                value={room}
-                onChangeText={setRoom}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Time window (optional)
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="e.g., 6PM–11PM, Mon–Thu"
-                placeholderTextColor={theme.muted}
-                value={timeWindow}
-                onChangeText={setTimeWindow}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Semester
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                  },
-                ]}
-                placeholder="e.g., Spring 2026"
-                placeholderTextColor={theme.muted}
-                value={semester}
-                onChangeText={setSemester}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: theme.muted }]}>
-                Description
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: "#FFFFFF",
-                    color: theme.text,
-                    borderColor: theme.border,
-                    minHeight: 90,
-                    textAlignVertical: "top",
-                  },
-                ]}
-                multiline
-                placeholder="Describe the purpose, who needs access, and any special conditions."
-                placeholderTextColor={theme.muted}
-                value={details}
-                onChangeText={setDetails}
-              />
-            </View>
-
-            <PressableScale
-              onPress={submit}
-              disabled={submitting}
-              style={{ marginTop: 16 }}
-            >
-              <View
-                style={[
-                  styles.primaryBtn,
-                  { backgroundColor: submitting ? "#9CA3AF" : theme.accent },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    { color: "#FFFFFF" },
-                  ]}
-                >
-                  {submitting ? "Submitting…" : "Submit request"}
-                </Text>
-              </View>
-            </PressableScale>
+        <SectionCard
+          title="Request Details"
+          style={{ marginTop: 14, marginBottom: 20 }}
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Title</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Short title"
+              placeholderTextColor={COLORS.muted}
+              value={title}
+              onChangeText={setTitle}
+            />
           </View>
-        </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Building</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., McNair Hall"
+              placeholderTextColor={COLORS.muted}
+              value={building}
+              onChangeText={setBuilding}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Room (optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Room 220"
+              placeholderTextColor={COLORS.muted}
+              value={room}
+              onChangeText={setRoom}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Category</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Lab Access, Study Space"
+              placeholderTextColor={COLORS.muted}
+              value={category}
+              onChangeText={setCategory}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Priority</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., High, Normal, Low"
+              placeholderTextColor={COLORS.muted}
+              value={priority}
+              onChangeText={setPriority}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Details</Text>
+            <TextInput
+              style={[styles.input, { height: 120, textAlignVertical: "top" }]}
+              placeholder="Describe who needs access, when, and why."
+              placeholderTextColor={COLORS.muted}
+              multiline
+              value={details}
+              onChangeText={setDetails}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Submit Request"
+            onPress={submitRequest}
+            loading={submitting}
+            style={{ marginTop: 8 }}
+          />
+        </SectionCard>
+      </ScrollView>
+    </AppScreen>
   );
 }
 
-/* ---------------- REQUESTS HISTORY ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                             REQUESTS LIST SCREEN                          */
+/* ------------------------------------------------------------------------- */
 
-function RequestsScreen({ navigation, theme }) {
-  const [reqs, setReqs] = useState([]);
-  const [filtered, setFiltered] = useState([]);
-  const [filter, setFilter] = useState("all");
+function RequestsScreen() {
+  const [requests, setRequests] = useState([]);
+  const [filter, setFilter] = useState("All");
 
-  const load = async () => {
-    const json = await AsyncStorage.getItem("requests");
-    const list = json ? JSON.parse(json) : [];
-    setReqs(list);
-    applyFilter(filter, list);
-  };
-
-  const applyFilter = (mode, listOverride) => {
-    const base = listOverride ?? reqs;
-    let out = base;
-    if (mode === "pending") {
-      out = base.filter(
-        (r) => r.status === "Pending" || r.status === "Under review"
-      );
-    } else if (mode === "approved") {
-      out = base.filter(
-        (r) => r.status === "Approved" || r.status === "Approved by Chair"
-      );
-    } else if (mode === "rejected") {
-      out = base.filter((r) => r.status === "Rejected");
-    }
-    setFilter(mode);
-    setFiltered(out);
+  const loadRequests = async () => {
+    const list = await loadRequestsLocal();
+    setRequests(list);
   };
 
   useEffect(() => {
-    const unsub = navigation.addListener("focus", load);
-    load();
-    return unsub;
-  }, [navigation]);
+    loadRequests();
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (filter === "All") return requests;
+    return requests.filter((r) => r.status === filter);
+  }, [filter, requests]);
 
   const renderItem = ({ item }) => {
-    let tone = "pending";
-    if (item.status === "Approved" || item.status === "Approved by Chair") {
-      tone = "success";
-    } else if (item.status === "Rejected") {
-      tone = "danger";
+    let tone = "default";
+    if (item.status === "Approved") tone = "success";
+    if (item.status === "Rejected") tone = "danger";
+    if (item.status === "Pending" || item.status === "Under Review") {
+      tone = "warning";
     }
 
     return (
-      <View
-        style={[
-          styles.card,
-          {
-            backgroundColor: theme.surface,
-            borderColor: theme.border,
-            marginBottom: 12,
-          },
-        ]}
-      >
+      <View style={styles.requestCard}>
         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-          <Text
-            style={{
-              color: theme.text,
-              fontWeight: "600",
-              flex: 1,
-              marginRight: 8,
-            }}
-          >
-            {item.title}
-          </Text>
-          <Text style={{ color: theme.muted, fontSize: 11 }}>
-            {new Date(item.timestamp).toLocaleString()}
-          </Text>
+          <Text style={styles.requestTitle}>{item.title}</Text>
+          <Tag label={item.status} tone={tone} />
         </View>
-
-        <Text
-          style={{
-            color: theme.muted,
-            marginTop: 4,
-            fontSize: 13,
-          }}
-        >
+        <Text style={styles.requestMeta}>
           {item.building}
-          {item.room ? ` • ${item.room}` : ""}
+          {item.room ? ` • ${item.room}` : ""} • {item.category}
         </Text>
-
-        <Text
-          style={{
-            color: theme.muted,
-            marginTop: 6,
-            fontSize: 13,
-          }}
-        >
-          {item.details}
+        <Text style={styles.requestMetaSmall}>
+          Submitted by {item.createdByName || "Unknown"} on{" "}
+          {new Date(item.createdAt).toLocaleString()}
         </Text>
-
-        <View
-          style={{
-            marginTop: 10,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Tag label={item.status} tone={tone} theme={theme} />
-            {item.semester ? (
-              <Tag
-                label={item.semester}
-                tone="info"
-                theme={theme}
-              />
-            ) : null}
-          </View>
-          <Text style={{ color: theme.muted, fontSize: 12 }}>
-            {item.name}
+        <Text style={styles.requestDetails}>{item.details}</Text>
+        <View style={styles.requestFooter}>
+          <Text style={styles.requestMetaSmall}>
+            Priority: {item.priority || "Normal"}
           </Text>
         </View>
       </View>
     );
   };
 
-  const activeStyle = (mode) =>
-    filter === mode
-      ? {
-          backgroundColor: "rgba(0,51,153,0.08)",
-          borderColor: theme.accent,
-        }
-      : {
-          backgroundColor: "#FFFFFF",
-          borderColor: theme.border,
-        };
+  const filterOptions = ["All", "Pending", "Approved", "Rejected"];
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <Animated.View style={[styles.container, { opacity: useFadeIn(260) }]}>
-        <AppHeader
-          title="Requests"
-          subtitle="History of submitted requests"
-          theme={theme}
-          showBack={true}
-          navigation={navigation}
-        />
+    <AppScreen>
+      <View style={[styles.container, { paddingBottom: 0 }]}>
+        <Text style={styles.appTitle}>Requests</Text>
+        <Text style={styles.appSubtitle}>
+          Filter and review your submitted requests.
+        </Text>
 
-        <View style={{ marginBottom: 10 }}>
-          <Text
-            style={{
-              color: theme.muted,
-              fontSize: 13,
-              marginBottom: 6,
-            }}
-          >
-            Filter by status
-          </Text>
-          <View style={{ flexDirection: "row" }}>
-            <TouchableOpacity
-              style={[styles.filterChip, activeStyle("all")]}
-              onPress={() => applyFilter("all")}
-            >
-              <Text style={{ color: theme.text, fontSize: 12 }}>All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterChip, activeStyle("pending")]}
-              onPress={() => applyFilter("pending")}
-            >
-              <Text style={{ color: theme.text, fontSize: 12 }}>Pending</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterChip, activeStyle("approved")]}
-              onPress={() => applyFilter("approved")}
-            >
-              <Text style={{ color: theme.text, fontSize: 12 }}>Approved</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterChip, activeStyle("rejected")]}
-              onPress={() => applyFilter("rejected")}
-            >
-              <Text style={{ color: theme.text, fontSize: 12 }}>Rejected</Text>
-            </TouchableOpacity>
+        <SectionCard title="Filter by status">
+          <View style={styles.filterRow}>
+            {filterOptions.map((opt) => {
+              const active = filter === opt;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[
+                    styles.filterChip,
+                    active && {
+                      backgroundColor: "#E0ECFF",
+                      borderColor: COLORS.primary,
+                    },
+                  ]}
+                  onPress={() => setFilter(opt)}
+                >
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: active ? COLORS.primary : COLORS.text,
+                      fontWeight: active ? "600" : "400",
+                    }}
+                  >
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        </View>
+        </SectionCard>
 
         {filtered.length === 0 ? (
-          <Text
-            style={{
-              color: theme.muted,
-              textAlign: "center",
-              marginTop: 20,
-              fontSize: 13,
-            }}
-          >
+          <Text style={{ color: COLORS.muted, marginTop: 16 }}>
             No requests match this filter yet.
           </Text>
         ) : (
           <FlatList
             data={filtered}
-            keyExtractor={(i) => i.id}
+            keyExtractor={(item) => item.id}
             renderItem={renderItem}
-            contentContainerStyle={{ paddingBottom: 40 }}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            style={{ marginTop: 10 }}
           />
         )}
-      </Animated.View>
-    </SafeAreaView>
+      </View>
+    </AppScreen>
   );
 }
 
-/* ---------------- ADMIN PANEL ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                                ADMIN SCREEN                               */
+/* ------------------------------------------------------------------------- */
 
-function AdminPanel({ navigation, theme }) {
-  const fade = useFadeIn(260);
-  const [pending, setPending] = useState([]);
+function AdminScreen() {
   const [requests, setRequests] = useState([]);
-  const [banner, setBanner] = useState(null);
 
-  const loadAll = async () => {
-    const usersJson = await AsyncStorage.getItem("users");
-    const users = usersJson ? JSON.parse(usersJson) : [];
-    setPending(users.filter((u) => !u.approved && u.role !== "admin"));
-
-    const reqsJson = await AsyncStorage.getItem("requests");
-    const reqs = reqsJson ? JSON.parse(reqsJson) : [];
-    setRequests(reqs);
+  const loadRequests = async () => {
+    const list = await loadRequestsLocal();
+    setRequests(list);
   };
 
   useEffect(() => {
-    const unsub = navigation.addListener("focus", loadAll);
-    loadAll();
-    return unsub;
-  }, [navigation]);
-
-  const approve = async (id) => {
-    const usersJson = await AsyncStorage.getItem("users");
-    let users = usersJson ? JSON.parse(usersJson) : [];
-    const userToApprove = users.find((u) => u.id === id);
-    users = users.map((u) => (u.id === id ? { ...u, approved: true } : u));
-    await AsyncStorage.setItem("users", JSON.stringify(users));
-
-    const reqsJson = await AsyncStorage.getItem("requests");
-    let reqs = reqsJson ? JSON.parse(reqsJson) : [];
-    reqs = reqs.map((r) =>
-      r.email === userToApprove.email ? { ...r, status: "Approved by Chair" } : r
-    );
-    await AsyncStorage.setItem("requests", JSON.stringify(reqs));
-
-    setBanner(`Approved ${userToApprove.name}`);
-    setTimeout(() => setBanner(null), 2500);
-    loadAll();
-  };
-
-  const totals = {
-    totalRequests: requests.length,
-    approved: requests.filter(
-      (r) => r.status === "Approved" || r.status === "Approved by Chair"
-    ).length,
-    rejected: requests.filter((r) => r.status === "Rejected").length,
-    pending: requests.filter(
-      (r) => r.status === "Pending" || r.status === "Under review"
-    ).length,
-  };
-
-  const approvalRate = totals.totalRequests
-    ? Math.round((totals.approved / totals.totalRequests) * 100)
-    : 0;
-
-  return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      {banner && (
-        <View style={styles.banner}>
-          <Text style={{ color: theme.accent, fontWeight: "600" }}>
-            {banner}
-          </Text>
-        </View>
-      )}
-      <Animated.View style={[styles.container, { opacity: fade }]}>
-        <AppHeader
-          title="Admin"
-          subtitle="Overview of access activity"
-          theme={theme}
-          showBack={true}
-          navigation={navigation}
-        />
-        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-                marginBottom: 12,
-              },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Summary
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Snapshot of building access requests in the current dataset.
-            </Text>
-
-            <View style={styles.kpiRow}>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Total
-                </Text>
-                <Text style={styles.kpiValue}>{totals.totalRequests}</Text>
-              </View>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Pending
-                </Text>
-                <Text style={[styles.kpiValue, { color: theme.pending }]}>
-                  {totals.pending}
-                </Text>
-              </View>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Approved
-                </Text>
-                <Text style={[styles.kpiValue, { color: theme.success }]}>
-                  {totals.approved}
-                </Text>
-              </View>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Rejected
-                </Text>
-                <Text style={[styles.kpiValue, { color: theme.danger }]}>
-                  {totals.rejected}
-                </Text>
-              </View>
-            </View>
-
-            <View style={{ marginTop: 12 }}>
-              <Text
-                style={{
-                  color: theme.muted,
-                  fontSize: 12,
-                  marginBottom: 4,
-                }}
-              >
-                Approval rate
-              </Text>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${approvalRate}%`,
-                      backgroundColor: theme.accent,
-                    },
-                  ]}
-                />
-              </View>
-              <Text
-                style={{
-                  color: theme.muted,
-                  fontSize: 12,
-                  marginTop: 4,
-                }}
-              >
-                {approvalRate}% of submitted requests approved
-              </Text>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.card,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Pending approvals
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Users waiting for chair approval.
-            </Text>
-
-            {pending.length === 0 ? (
-              <Text
-                style={{
-                  color: theme.muted,
-                  marginTop: 12,
-                  fontSize: 13,
-                }}
-              >
-                No pending users at this time.
-              </Text>
-            ) : (
-              pending.map((u) => (
-                <View
-                  key={u.id}
-                  style={{
-                    paddingVertical: 10,
-                    borderBottomWidth: 0.5,
-                    borderColor: theme.border,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: theme.text,
-                      fontWeight: "500",
-                      marginBottom: 2,
-                    }}
-                  >
-                    {u.name}
-                  </Text>
-                  <Text
-                    style={{ color: theme.muted, fontSize: 13, marginBottom: 6 }}
-                  >
-                    {u.email}
-                  </Text>
-                  <PressableScale onPress={() => approve(u.id)}>
-                    <View
-                      style={[
-                        styles.primaryBtnSmall,
-                        { backgroundColor: theme.accent },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          color: "#FFFFFF",
-                          fontWeight: "600",
-                          fontSize: 13,
-                        }}
-                      >
-                        Approve
-                      </Text>
-                    </View>
-                  </PressableScale>
-                </View>
-              ))
-            )}
-          </View>
-
-          <PressableScale
-            onPress={() => navigation.navigate("Requests")}
-            style={{ marginTop: 16 }}
-          >
-            <View
-              style={[
-                styles.secondaryBtn,
-                { borderColor: theme.border },
-              ]}
-            >
-              <Text
-                style={{
-                  color: theme.accent,
-                  fontWeight: "500",
-                  fontSize: 14,
-                }}
-              >
-                View full request history
-              </Text>
-            </View>
-          </PressableScale>
-        </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
-  );
-}
-
-/* ---------------- HOME ---------------- */
-
-function HomeScreen({ navigation, theme }) {
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const fade = useFadeIn(300);
-  const [user, setUser] = useState(null);
-  const [stats, setStats] = useState({
-    totalRequests: 0,
-    pendingRequests: 0,
-    approvedRequests: 0,
-  });
-
-  useEffect(() => {
-    (async () => {
-      const uJson = await AsyncStorage.getItem("user");
-      if (uJson) setUser(JSON.parse(uJson));
-
-      const rJson = await AsyncStorage.getItem("requests");
-      const list = rJson ? JSON.parse(rJson) : [];
-      const total = list.length;
-      const pending = list.filter(
-        (r) => r.status === "Pending" || r.status === "Under review"
-      ).length;
-      const approved = list.filter(
-        (r) => r.status === "Approved" || r.status === "Approved by Chair"
-      ).length;
-      setStats({
-        totalRequests: total,
-        pendingRequests: pending,
-        approvedRequests: approved,
-      });
-    })();
+    loadRequests();
   }, []);
 
-  const logout = async () => {
-    await signOutUser().catch(() => {});
-    await AsyncStorage.removeItem("user");
-    navigation.replace("Login");
+  const toggleStatus = async (id) => {
+    const updated = requests.map((r) => {
+      if (r.id !== id) return r;
+      if (r.status === "Pending" || r.status === "Under Review") {
+        return { ...r, status: "Approved" };
+      }
+      if (r.status === "Approved") {
+        return { ...r, status: "Rejected" };
+      }
+      return { ...r, status: "Pending" };
+    });
+    setRequests(updated);
+    await saveRequestsLocal(updated);
   };
 
-  const headerTranslate = scrollY.interpolate({
-    inputRange: [0, 40],
-    outputRange: [0, -10],
-    extrapolate: "clamp",
-  });
+  const stats = useMemo(() => {
+    const total = requests.length;
+    const pending = requests.filter(
+      (r) => r.status === "Pending" || r.status === "Under Review"
+    ).length;
+    const approved = requests.filter((r) => r.status === "Approved").length;
+    const rejected = requests.filter((r) => r.status === "Rejected").length;
+    return { total, pending, approved, rejected };
+  }, [requests]);
+
+  const renderItem = ({ item }) => (
+    <TouchableOpacity onPress={() => toggleStatus(item.id)}>
+      <View style={styles.requestCard}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <Text style={styles.requestTitle}>{item.title}</Text>
+          <Tag label={item.status} />
+        </View>
+        <Text style={styles.requestMeta}>
+          {item.building}
+          {item.room ? ` • ${item.room}` : ""} • {item.category}
+        </Text>
+        <Text style={styles.requestMetaSmall}>
+          Tap to cycle status (Pending → Approved → Rejected → Pending)
+        </Text>
+        <Text style={styles.requestDetails}>{item.details}</Text>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle="dark-content" />
-      <Animated.View style={[styles.container, { opacity: fade }]}>
-        <Animated.View style={{ transform: [{ translateY: headerTranslate }] }}>
-          <AppHeader
-            title="Aggie One Access"
-            subtitle={
-              user
-                ? `Welcome, ${user.name.split(" ")[0]}`
-                : "Manage building access requests"
-            }
-            theme={theme}
-            showBack={false}
-            navigation={navigation}
-            right={
-              <TouchableOpacity onPress={() => navigation.navigate("Requests")}>
-                <Text
-                  style={{
-                    color: theme.accent,
-                    fontWeight: "500",
-                    fontSize: 14,
-                  }}
-                >
-                  Requests
-                </Text>
-              </TouchableOpacity>
-            }
-          />
-        </Animated.View>
+    <AppScreen>
+      <View style={[styles.container, { paddingBottom: 0 }]}>
+        <Text style={styles.appTitle}>Admin View</Text>
+        <Text style={styles.appSubtitle}>
+          Demonstrates how an approver would process requests.
+        </Text>
 
-        <Animated.ScrollView
-          contentContainerStyle={{ paddingBottom: 80 }}
-          scrollEventThrottle={16}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false }
-          )}
-        >
-          {/* Profile summary */}
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-                marginBottom: 12,
-              },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Your summary
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Quick view of your activity in Aggie One Access.
-            </Text>
-
-            <View style={styles.profileRow}>
-              <View style={styles.profileCircle}>
-                <Text style={{ color: "#FFFFFF", fontWeight: "600" }}>
-                  {user?.name?.[0]?.toUpperCase() || "A"}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    color: theme.text,
-                    fontWeight: "600",
-                    marginBottom: 2,
-                  }}
-                >
-                  {user?.name || "Faculty member"}
-                </Text>
-                <Text style={{ color: theme.muted, fontSize: 13 }}>
-                  {user?.email || "you@ncat.edu"}
-                </Text>
-              </View>
+        <SectionCard title="Summary">
+          <View style={styles.row}>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Total</Text>
+              <Text style={styles.kpiValue}>{stats.total}</Text>
             </View>
-
-            <View style={styles.kpiRow}>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Requests
-                </Text>
-                <Text style={styles.kpiValue}>{stats.totalRequests}</Text>
-              </View>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Pending
-                </Text>
-                <Text
-                  style={[styles.kpiValue, { color: theme.pending }]}
-                >
-                  {stats.pendingRequests}
-                </Text>
-              </View>
-              <View style={styles.kpiCard}>
-                <Text style={{ color: theme.muted, fontSize: 12 }}>
-                  Approved
-                </Text>
-                <Text
-                  style={[styles.kpiValue, { color: theme.success }]}
-                >
-                  {stats.approvedRequests}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Actions */}
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-                marginBottom: 12,
-              },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              Actions
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Create and review access requests, or update your profile.
-            </Text>
-
-            <PressableScale
-              onPress={() => navigation.navigate("RequestForm")}
-              style={{ marginTop: 12 }}
-            >
-              <View
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Pending</Text>
+              <Text
                 style={[
-                  styles.primaryBtn,
-                  {
-                    backgroundColor: theme.accent,
-                  },
+                  styles.kpiValue,
+                  { color: COLORS.warning },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    { color: "#FFFFFF" },
-                  ]}
-                >
-                  New request
-                </Text>
-              </View>
-            </PressableScale>
-
-            <PressableScale
-              onPress={() => navigation.navigate("Requests")}
-              style={{ marginTop: 10 }}
-            >
-              <View style={styles.secondaryBtn}>
-                <Text
-                  style={{
-                    color: theme.accent,
-                    fontWeight: "500",
-                    fontSize: 14,
-                  }}
-                >
-                  View requests
-                </Text>
-              </View>
-            </PressableScale>
-
-            <PressableScale
-              onPress={() => navigation.navigate("BuildingRole")}
-              style={{ marginTop: 10 }}
-            >
-              <View style={styles.secondaryBtn}>
-                <Text
-                  style={{
-                    color: theme.accent,
-                    fontWeight: "500",
-                    fontSize: 14,
-                  }}
-                >
-                  Edit profile
-                </Text>
-              </View>
-            </PressableScale>
-
-            <PressableScale onPress={logout} style={{ marginTop: 10 }}>
-              <View style={styles.secondaryBtn}>
-                <Text
-                  style={{
-                    color: theme.danger,
-                    fontWeight: "500",
-                    fontSize: 14,
-                  }}
-                >
-                  Sign out
-                </Text>
-              </View>
-            </PressableScale>
+                {stats.pending}
+              </Text>
+            </View>
           </View>
-
-          {/* Pipeline explanation */}
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-              },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              How requests move through Aggie One Access
-            </Text>
-            <Text style={[styles.sectionDescription, { color: theme.muted }]}>
-              Requests follow a consistent process so faculty, staff, and
-              students know what to expect.
-            </Text>
-            <PipelineStrip theme={theme} />
+          <View style={styles.row}>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Approved</Text>
+              <Text
+                style={[
+                  styles.kpiValue,
+                  { color: COLORS.success },
+                ]}
+              >
+                {stats.approved}
+              </Text>
+            </View>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Rejected</Text>
+              <Text
+                style={[
+                  styles.kpiValue,
+                  { color: COLORS.danger },
+                ]}
+              >
+                {stats.rejected}
+              </Text>
+            </View>
           </View>
-        </Animated.ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+        </SectionCard>
+
+        <SectionCard
+          title="Pending & Processed Requests"
+          subtitle="Tap any card to cycle its status."
+          style={{ marginTop: 14 }}
+        >
+          {requests.length === 0 ? (
+            <Text style={{ color: COLORS.muted }}>
+              No requests in the system yet.
+            </Text>
+          ) : (
+            <FlatList
+              data={requests}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              scrollEnabled={false}
+            />
+          )}
+        </SectionCard>
+      </View>
+    </AppScreen>
   );
 }
 
-/* ---------------- APP ROOT ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                                 HELP SCREEN                               */
+/* ------------------------------------------------------------------------- */
+
+function HelpScreen() {
+  return (
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+      >
+        <Text style={styles.appTitle}>Help & FAQ</Text>
+        <Text style={styles.appSubtitle}>
+          Use these explanations as talking points in your presentation.
+        </Text>
+
+        <SectionCard title="What problem does this solve?">
+          <Text style={styles.smallText}>
+            - Faculty and staff often rely on email chains or paper forms to
+            request building, lab, or room access.
+          </Text>
+          <Text style={styles.smallText}>
+            - This app centralizes those requests in a single, trackable
+            system.
+          </Text>
+          <Text style={styles.smallText}>
+            - Admins can quickly review new requests and keep status updated.
+          </Text>
+        </SectionCard>
+
+        <SectionCard
+          title="How does the workflow look?"
+          style={{ marginTop: 14 }}
+        >
+          <Text style={styles.smallText}>1. User signs in with NCAT email.</Text>
+          <Text style={styles.smallText}>
+            2. User submits a request specifying building, room, category, and
+            details.
+          </Text>
+          <Text style={styles.smallText}>
+            3. Request is stored locally (this can be extended to Supabase
+            tables).
+          </Text>
+          <Text style={styles.smallText}>
+            4. Admin uses the Admin View to simulate approval decisions.
+          </Text>
+          <Text style={styles.smallText}>
+            5. Status changes appear instantly in the Requests screen.
+          </Text>
+        </SectionCard>
+
+        <SectionCard
+          title="How could this scale?"
+          style={{ marginTop: 14, marginBottom: 20 }}
+        >
+          <Text style={styles.smallText}>
+            - Integrate with Supabase tables for persistent cloud storage.
+          </Text>
+          <Text style={styles.smallText}>
+            - Connect to actual Aggie One access control APIs.
+          </Text>
+          <Text style={styles.smallText}>
+            - Add email notifications when a request is approved or rejected.
+          </Text>
+          <Text style={styles.smallText}>
+            - Add filters for specific buildings and departments.
+          </Text>
+        </SectionCard>
+      </ScrollView>
+    </AppScreen>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/*                               SETTINGS SCREEN                             */
+/* ------------------------------------------------------------------------- */
+
+function SettingsScreen() {
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
+  const [darkModeFlag, setDarkModeFlag] = useState(false); // flag only, UI stays light
+
+  return (
+    <AppScreen>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+      >
+        <Text style={styles.appTitle}>Settings</Text>
+        <Text style={styles.appSubtitle}>
+          These options are stored locally and can be described as future work.
+        </Text>
+
+        <SectionCard title="Preferences">
+          <View style={styles.settingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingTitle}>Request Notifications</Text>
+              <Text style={styles.settingSubtitle}>
+                (Future work) Notify when a request is approved or rejected.
+              </Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={setNotificationsEnabled}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingTitle}>Usage Analytics</Text>
+              <Text style={styles.settingSubtitle}>
+                (Future work) Aggregate stats across departments.
+              </Text>
+            </View>
+            <Switch
+              value={analyticsEnabled}
+              onValueChange={setAnalyticsEnabled}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingTitle}>Dark Mode Flag</Text>
+              <Text style={styles.settingSubtitle}>
+                UI stays light for now, but this toggle reflects user
+                preference.
+              </Text>
+            </View>
+            <Switch value={darkModeFlag} onValueChange={setDarkModeFlag} />
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          title="About This App"
+          style={{ marginTop: 14, marginBottom: 20 }}
+        >
+          <Text style={styles.smallText}>
+            - Built with React Native and Expo, targeting mobile devices.
+          </Text>
+          <Text style={styles.smallText}>
+            - Uses AsyncStorage for local persistence of user accounts and
+            requests.
+          </Text>
+          <Text style={styles.smallText}>
+            - Supabase handles authentication and can back future database
+            features.
+          </Text>
+        </SectionCard>
+      </ScrollView>
+    </AppScreen>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/*                                 ROOT APP                                  */
+/* ------------------------------------------------------------------------- */
 
 export default function App() {
-  const [session, setSession] = useState(null);
-  const deviceScheme = useColorScheme();
-  const [scheme, setScheme] = useState(deviceScheme || "light");
-  const [initial, setInitial] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [initialRoute, setInitialRoute] = useState(null);
 
-  // seed demo data
   useEffect(() => {
     (async () => {
-      try {
-        const inited = await AsyncStorage.getItem("appInitialized");
-        if (!inited) {
-          const demoUsers = [
-            {
-              id: "admin-1",
-              name: "Admin User",
-              email: "admin@ncat.edu",
-              password: "admin123",
-              role: "admin",
-              building: "Admin Office",
-              approved: true,
-            },
-            {
-              id: "prof-pend-1",
-              name: "Prof Demo",
-              email: "prof_demo@ncat.edu",
-              password: "prof123",
-              role: "professor",
-              building: "McNair Hall",
-              approved: false,
-            },
-          ];
-          await AsyncStorage.setItem("users", JSON.stringify(demoUsers));
-          await AsyncStorage.setItem("requests", JSON.stringify([]));
-          await AsyncStorage.setItem("appInitialized", "1");
-        }
-
-        const current = await AsyncStorage.getItem("user");
-        setInitial(current ? "MainApp" : "Login");
-      } catch (e) {
-        console.log("init error", e);
-        setInitial("Login");
-      } finally {
-        setLoading(false);
-      }
+      const user = await loadUserLocal();
+      setInitialRoute(user ? "Home" : "Login");
     })();
   }, []);
 
-  // Supabase auth session listener
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const sub = Appearance.addChangeListener(({ colorScheme }) =>
-      setScheme(colorScheme || "light")
-    );
-    return () => sub.remove();
-  }, []);
-
-  const theme = buildTheme(scheme);
-
-  if (loading) {
+  if (!initialRoute) {
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.accent} />
-          <Text style={{ marginTop: 10, color: theme.muted }}>
+      <AppScreen>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={{ marginTop: 8, color: COLORS.muted }}>
             Loading Aggie One Access…
           </Text>
         </View>
-      </SafeAreaView>
+      </AppScreen>
     );
   }
 
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName={initial}
-        screenOptions={{ headerShown: false }}
+        initialRouteName={initialRoute}
+        screenOptions={{
+          headerStyle: { backgroundColor: COLORS.card },
+          headerTitleStyle: { fontWeight: "600" },
+          headerTintColor: COLORS.primary,
+        }}
       >
-        <Stack.Screen name="Login">
-          {(props) => <LoginScreen {...props} theme={theme} />}
-        </Stack.Screen>
-
-        <Stack.Screen name="Signup">
-          {(props) => <SignupScreen {...props} theme={theme} />}
-        </Stack.Screen>
-
-        <Stack.Screen name="BuildingRole">
-          {(props) => <BuildingRoleScreen {...props} theme={theme} />}
-        </Stack.Screen>
-
-        <Stack.Screen name="MainApp">
-          {() => (
-            <Drawer.Navigator
-              initialRouteName="Home"
-              screenOptions={{
-                headerShown: false,
-                drawerStyle: {
-                  backgroundColor: theme.surface,
-                  width: 250,
-                },
-                drawerActiveTintColor: theme.accent,
-                drawerInactiveTintColor: theme.muted,
-              }}
-            >
-              <Drawer.Screen name="Home">
-                {(props) => <HomeScreen {...props} theme={theme} />}
-              </Drawer.Screen>
-
-              <Drawer.Screen
-                name="RequestForm"
-                options={{ title: "New request" }}
-              >
-                {(props) => <RequestFormScreen {...props} theme={theme} />}
-              </Drawer.Screen>
-
-              <Drawer.Screen
-                name="Requests"
-                options={{ title: "Requests" }}
-              >
-                {(props) => <RequestsScreen {...props} theme={theme} />}
-              </Drawer.Screen>
-
-              <Drawer.Screen
-                name="AdminPanel"
-                options={{ title: "Admin" }}
-              >
-                {(props) => <AdminPanel {...props} theme={theme} />}
-              </Drawer.Screen>
-
-              <Drawer.Screen
-                name="Profile"
-                options={{ title: "Profile" }}
-              >
-                {(props) => <BuildingRoleScreen {...props} theme={theme} />}
-              </Drawer.Screen>
-            </Drawer.Navigator>
-          )}
-        </Stack.Screen>
+        <Stack.Screen
+          name="Login"
+          component={LoginScreen}
+          options={{ title: "Sign In" }}
+        />
+        <Stack.Screen
+          name="Signup"
+          component={SignupScreen}
+          options={{ title: "Create Account" }}
+        />
+        <Stack.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{ title: "Aggie One Access" }}
+        />
+        <Stack.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={{ title: "Profile" }}
+        />
+        <Stack.Screen
+          name="RequestForm"
+          component={RequestFormScreen}
+          options={{ title: "New Request" }}
+        />
+        <Stack.Screen
+          name="Requests"
+          component={RequestsScreen}
+          options={{ title: "Requests" }}
+        />
+        <Stack.Screen
+          name="Admin"
+          component={AdminScreen}
+          options={{ title: "Admin View" }}
+        />
+        <Stack.Screen
+          name="Help"
+          component={HelpScreen}
+          options={{ title: "Help & FAQ" }}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{ title: "Settings" }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
 
-/* ---------------- STYLES ---------------- */
+/* ------------------------------------------------------------------------- */
+/*                                   STYLES                                  */
+/* ------------------------------------------------------------------------- */
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  container: { paddingHorizontal: 18, paddingTop: 8, flex: 1 },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-  /* Header */
-  headerWrapper: {
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  container: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  appTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  appSubtitle: {
+    fontSize: 13,
+    color: COLORS.muted,
+    marginTop: 4,
     marginBottom: 12,
   },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  headerBackButton: {
-    paddingRight: 8,
-    paddingVertical: 4,
-    marginRight: 4,
-  },
-  headerBackText: {
-    fontSize: 24,
-    fontWeight: "400",
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-
-  /* Cards / Layout */
   card: {
+    backgroundColor: COLORS.card,
+    borderRadius: SIZES.radiusLg,
+    padding: SIZES.padding,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 16,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 3,
+    borderColor: COLORS.border,
+    marginTop: 10,
   },
   sectionTitle: {
     fontSize: 17,
     fontWeight: "600",
-    marginBottom: 4,
+    color: COLORS.text,
   },
-  sectionDescription: {
+  sectionSubtitle: {
     fontSize: 13,
+    color: COLORS.muted,
+    marginTop: 4,
     marginBottom: 8,
   },
-
-  /* Text / Inputs */
-  fieldGroup: {
+  field: {
     marginTop: 10,
   },
-  fieldLabel: {
+  label: {
     fontSize: 13,
-    fontWeight: "500",
+    color: COLORS.text,
     marginBottom: 4,
   },
   input: {
     borderWidth: 1,
+    borderColor: COLORS.border,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
+    backgroundColor: "#FFFFFF",
+    color: COLORS.text,
     fontSize: 14,
   },
-
-  /* Buttons */
   primaryBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
     paddingVertical: 12,
-    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryBtnSmall: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
+  primaryBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 15,
   },
   secondaryBtn: {
-    paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
   },
-  primaryBtnText: {
-    fontWeight: "600",
-    fontSize: 15,
+  secondaryBtnText: {
+    color: COLORS.primary,
+    fontWeight: "500",
+    fontSize: 14,
   },
-
+  linkText: {
+    fontSize: 13,
+    color: COLORS.muted,
+  },
+  smallText: {
+    fontSize: 13,
+    color: COLORS.muted,
+    marginTop: 4,
+  },
   row: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-  },
-  link: {
-    fontWeight: "500",
-  },
-
-  /* Profile */
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
     marginTop: 10,
-  },
-  profileCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: NCAT_BLUE,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-
-  /* Role buttons */
-  roleRow: {
-    flexDirection: "row",
-    marginTop: 4,
-  },
-  roleBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 8,
-    alignItems: "center",
-    marginRight: 8,
-  },
-
-  /* Tag */
-  tag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    marginLeft: 6,
-  },
-
-  /* Filter chips */
-  filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    marginRight: 8,
-  },
-
-  /* Pipeline */
-  pipelineStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-    flexWrap: "nowrap",
-  },
-  pipelineStep: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  pipelineDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    borderWidth: 2,
-    marginRight: 4,
-  },
-  pipelineLabel: {
-    fontSize: 11,
-    maxWidth: 80,
-  },
-  pipelineConnector: {
-    borderBottomWidth: 1,
-    marginHorizontal: 6,
-    width: 20,
-    opacity: 0.6,
-  },
-
-  /* Example chip */
-  exampleChip: {
-    backgroundColor: "#EFF3FF",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginTop: 4,
-  },
-
-  /* KPI */
-  kpiRow: {
-    flexDirection: "row",
-    marginTop: 10,
-    justifyContent: "space-between",
   },
   kpiCard: {
     flex: 1,
@@ -2191,31 +1535,120 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  kpiLabel: {
+    fontSize: 12,
+    color: COLORS.muted,
   },
   kpiValue: {
     fontSize: 18,
     fontWeight: "600",
     marginTop: 2,
+    color: COLORS.text,
   },
-
-  /* Progress */
-  progressTrack: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: "#E5E7EB",
-    overflow: "hidden",
+  requestCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 8,
   },
-  progressFill: {
-    height: 8,
-    borderRadius: 999,
+  requestTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.text,
   },
-
-  /* Banner */
-  banner: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: "#EFF6FF",
+  requestMeta: {
+    fontSize: 13,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  requestMetaSmall: {
+    fontSize: 11,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  requestDetails: {
+    fontSize: 13,
+    color: COLORS.text,
+    marginTop: 6,
+  },
+  requestFooter: {
+    marginTop: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
+  },
+  tag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: COLORS.chipBg,
+    marginLeft: 8,
+  },
+  labeledRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  labeledRowLabel: {
+    fontSize: 13,
+    color: COLORS.muted,
+  },
+  labeledRowValue: {
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: "500",
+    maxWidth: "60%",
+    textAlign: "right",
+  },
+  templateChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 10,
+    marginTop: 8,
+    backgroundColor: "#F9FAFF",
+  },
+  templateTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  templateSubtitle: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  filterRow: {
+    flexDirection: "row",
+    marginTop: 4,
+  },
+  filterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  settingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+  },
+  settingTitle: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.text,
+  },
+  settingSubtitle: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginTop: 2,
   },
 });
