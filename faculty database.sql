@@ -1,0 +1,167 @@
+-- =========================================
+-- SQL Script: Employees with Job Titles
+-- =========================================
+
+-- Drop table if it already exists (for reruns)
+DROP TABLE IF EXISTS employees;
+
+-- Create the employees table
+CREATE TABLE chairs (
+    employee_ID   INT PRIMARY KEY,
+    first_name    VARCHAR(50) NOT NULL,
+    last_name     VARCHAR(50) NOT NULL,
+    department    VARCHAR(100) NOT NULL,
+    email         VARCHAR(100) NOT NULL,
+);
+
+-- Insert sample employee data
+INSERT INTO chairs (employee_ID, first_name, last_name, department, email) VALUES
+(40022234, 'Kaushik',   'Roy', 'CS',  'roy@ncat.edu'),
+(40022345, 'Ravi',     'Jain',   'ECE',  'rkjain@ncat.edu'),
+(40022456, 'Jianzhong', 'Lou',   'CBBE',  'lou@ncat.edu'),
+(40022567, 'Manoj',   'Jha',  'CAEE',    'mkjha@ncat.edu'),
+(40022678, 'John',   'Kizito',   'MEEN',  'jpkizito@ncat.edu'),
+(40022789, 'Om Prakash',   'Yadav',   'ISE',  'oyadav@ncat.edu'),
+(40022606, 'Jalen', 'Hunter',   'chair',  'jangus@aggies.ncat.edu');
+
+
+
+-- Query to get employee full name and job title
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS employee_name,
+    employee_class
+FROM chairs
+ORDER BY department;
+
+-- =========================================
+-- SQL Script: Buildings and their managers
+-- =========================================
+
+-- Drop table if it already exists (for reruns)
+DROP TABLE IF EXISTS buildings;
+
+-- Building ID code table
+CREATE TABLE buildings (
+    building_ID_Code   INT PRIMARY KEY,
+    building    VARCHAR(25) NOT NULL,
+    manager     VARCHAR(50) NOT NULL,
+);
+
+
+-- Building Names and Managers
+INSERT INTO buidlings (building_ID_code, building, manager) VALUES
+(22, 'Martin',   'Bethea'),
+(21, 'Monroe',   'Hogue'),
+(87, 'McNair',   'Hogue'),
+(39, 'Graham',   'Hogue'),
+(99, 'NCAT',      'Hill');
+SELECT 
+    CONCAT(building_ID_code) AS userBuilding
+FROM chairs
+ORDER BY building;
+
+
+-- Drop table if it already exists (for reruns)
+DROP TABLE IF EXISTS employees;
+
+-- Create the employees table
+CREATE TABLE userClassification (
+    class_ID   INT PRIMARY KEY,
+    title    VARCHAR(50) NOT NULL,
+  
+);
+
+-- Insert sample employee data
+INSERT INTO classification (class_ID, title) VALUES
+(500, 'Manager'),
+(450, 'Dean'),
+(400, 'Chair'),
+(300, 'Admin'),
+(200, 'Researcher'),
+(100, 'Manager');
+
+-- Query to get employee full name and job title
+SELECT 
+    CONCAT(class_ID) AS userClassification
+FROM chairs
+ORDER BY title;
+
+
+
+-- =========================================
+-- SQL Script: Employees with Deans of Engineering Department
+-- =========================================
+
+-- Drop table if it already exists (for reruns)
+DROP TABLE IF EXISTS deans;
+
+-- Create the employees table
+CREATE TABLE deans (
+    employee_ID   INT PRIMARY KEY,
+    first_name    VARCHAR(50) NOT NULL,
+    last_name     VARCHAR(50) NOT NULL,
+    email         VARCHAR(100) NOT NULL,
+);
+
+-- Insert sample employee data
+INSERT INTO deans (employee_ID, first_name, last_name, email) VALUES
+(45022123, 'Stephanie',   'Luster-Teasly', '@ncat.edu');
+
+
+
+-- Query to get employee full name and job title
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS dean_name
+FROM deans
+ORDER BY employee_ID;
+
+
+-- =========================================
+-- SQL Script: Employees with Job Titles
+-- =========================================
+
+-- Drop table if it already exists (for reruns)
+DROP TABLE IF EXISTS betaTesters;
+
+-- Create the employees table
+CREATE TABLE betaTesters (
+    tester_ID   INT PRIMARY KEY,
+    first_name    VARCHAR(50) NOT NULL,
+    last_name     VARCHAR(50) NOT NULL,
+    testerRole    VARCHAR(100) NOT NULL,
+    email         VARCHAR(100) NOT NULL,
+);
+
+-- Insert sample employee data
+INSERT INTO testers (tester_ID, first_name, last_name, testerRole, email) VALUES
+(50022414, 'Micah',   'Hill', 'buildingManager', 'mhill75@aggies.ncat.edu'),
+(15022525, 'Kori',   'Jackson',   'student', 'kljackson5@aggies.ncat.edu'),
+(40022606, 'Jalen', 'Hunter',   'chair',  'jangus@aggies.ncat.edu'),
+(40022232, 'Cameron',   'Tatum',  'professor',     'cmtatum1@aggies.ncat.edu');
+-- Query to get employee full name and job title
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS tester_name,
+    testerRole
+FROM testers
+ORDER BY email;
+
+-- Create the employees table
+CREATE TABLE managers (
+   manager_ID   INT PRIMARY KEY,
+    first_name    VARCHAR(50) NOT NULL,
+    last_name     VARCHAR(50) NOT NULL,
+    building      VARCHAR(100) NOT NULL,
+    email         VARCHAR(100) NOT NULL,
+);
+
+-- Insert sample employee data
+INSERT INTO testers (manager_ID, first_name, last_name, building, email) VALUES
+(50021414, 'Cecil',   'Hogue', 'McNair', 'cahogue@ncat.edu'),
+(50022215, 'Malcolm',   'Bethea',   'Martin', 'bethea@ncat.edu'),
+(50022414, 'Micah',   'Hill', 'buildingManager', 'mhill75@aggies.ncat.edu');
+
+SELECT 
+    CONCAT(first_name, ' ', last_name) AS manager_name,
+    building
+FROM managers
+ORDER BY email;
